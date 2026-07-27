@@ -1968,7 +1968,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-b
 
   // js/core/db.js
   var DB_NAME = "immo-protech";
-  var DB_VERSION = 1;
+  var DB_VERSION = 2;
   var STORES = {
     buildings: { keyPath: "id" },
     interventions: { keyPath: "id", indexes: ["buildingId", "status", "companyId"] },
@@ -1980,8 +1980,10 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-b
     events: { keyPath: "id", indexes: ["buildingId", "type", "date"] },
     notes: { keyPath: "id", indexes: ["buildingId"] },
     budgets: { keyPath: "id", indexes: ["year"] },
-    settings: { keyPath: "key" }
+    settings: { keyPath: "key" },
+    backups: { keyPath: "id", indexes: ["createdAt"] }
   };
+  var DATA_STORES = Object.keys(STORES).filter((n) => n !== "backups");
   var _db = null;
   function openDB() {
     if (_db) return Promise.resolve(_db);
@@ -2050,7 +2052,7 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-b
   }
   async function exportAll() {
     const data = {};
-    for (const name of Object.keys(STORES)) {
+    for (const name of DATA_STORES) {
       data[name] = await getAll(name);
     }
     return {
@@ -2062,16 +2064,83 @@ table.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-b
   }
   async function importAll(payload, mode2 = "replace") {
     const data = payload.data || payload;
-    for (const name of Object.keys(STORES)) {
+    for (const name of DATA_STORES) {
       if (!data[name]) continue;
       if (mode2 === "replace") await clearStore(name);
       await putMany(name, data[name]);
     }
   }
   async function resetAll() {
-    for (const name of Object.keys(STORES)) {
+    for (const name of DATA_STORES) {
       await clearStore(name);
     }
+  }
+
+  // Sauvegardes internes (snapshots stock\xE9s dans IndexedDB)
+  var BACKUP_LABELS = {
+    manual: "Manuelle",
+    auto: "Automatique",
+    "pre-restore": "Avant restauration",
+    "pre-reset": "Avant r\xE9initialisation",
+    "pre-import": "Avant import",
+    "pre-demo": "Avant rechargement d\xE9mo"
+  };
+  var MAX_BACKUPS_PER_KIND = 12;
+  function backupIsAuto(reason) {
+    return reason === "auto";
+  }
+  async function createBackup(reason = "manual") {
+    const snapshot = await exportAll();
+    const counts = {};
+    let items = 0;
+    for (const name of DATA_STORES) {
+      if (name === "settings") continue;
+      counts[name] = (snapshot.data[name] || []).length;
+      items += counts[name];
+    }
+    const payload = JSON.stringify(snapshot.data);
+    const record = {
+      id: "bak_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      reason,
+      version: DB_VERSION,
+      counts,
+      items,
+      size: payload.length,
+      data: snapshot.data
+    };
+    await put("backups", record);
+    await pruneBackups(reason);
+    return record;
+  }
+  async function pruneBackups(reason) {
+    const list = await getAll("backups");
+    const sameKind = list.filter((b) => backupIsAuto(b.reason) === backupIsAuto(reason)).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    for (const old of sameKind.slice(MAX_BACKUPS_PER_KIND)) {
+      await remove("backups", old.id);
+    }
+  }
+  async function listBackups() {
+    const list = await getAll("backups");
+    return list.map(({ data, ...meta }) => meta).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+  async function restoreBackup(id) {
+    const record = await get("backups", id);
+    if (!record || !record.data) throw new Error("Sauvegarde introuvable");
+    await createBackup("pre-restore");
+    for (const name of DATA_STORES) {
+      await clearStore(name);
+      if (record.data[name]) await putMany(name, record.data[name]);
+    }
+    return record;
+  }
+  async function deleteBackup(id) {
+    await remove("backups", id);
+  }
+  async function latestBackupAt() {
+    const list = await getAll("backups");
+    if (!list.length) return null;
+    return list.reduce((max, b) => (b.createdAt > max ? b.createdAt : max), "");
   }
 
   // js/core/store.js
@@ -5885,6 +5954,24 @@ ${buildContext(b.id)}`;
       const quota = (est.quota / 1048576).toFixed(0);
       storageInfo = `${used} Mo utilis\xE9s sur ~${formatNumber(quota)} Mo disponibles`;
     }
+    const backups = await listBackups();
+    const autoBackup = getSetting("autoBackup") !== false;
+    const fmtSize = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + " Mo" : b >= 1024 ? Math.round(b / 1024) + " Ko" : (b || 0) + " o";
+    const fmtDT = (iso) => {
+      const d = new Date(iso);
+      return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) + " \xE0 " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    };
+    const backupRows = backups.length ? backups.map((b) => `
+          <div class="flex items-center gap-2" data-backup="${b.id}" style="padding:8px 0;border-top:1px solid var(--border)">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:var(--fs-sm);font-weight:600">${fmtDT(b.createdAt)}
+                <span class="badge-pill ${b.reason === "manual" ? "badge-accent" : "badge-neutral"}" style="margin-left:6px">${BACKUP_LABELS[b.reason] || b.reason}</span>
+              </div>
+              <div class="text-tertiary" style="font-size:var(--fs-xs)">${b.items} \xE9l\xE9ment${b.items > 1 ? "s" : ""} \xB7 ${fmtSize(b.size)}</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-restore="${b.id}">${icon("refresh", 14)} Restaurer</button>
+            <button class="btn btn-ghost btn-sm" data-del-backup="${b.id}" title="Supprimer cette sauvegarde">${icon("trash", 14)}</button>
+          </div>`).join("") : `<p class="text-tertiary" style="font-size:var(--fs-sm)">Aucune sauvegarde interne pour l'instant.</p>`;
     const body = `
     <div style="max-width:760px">
       <!-- Apparence -->
@@ -5948,6 +6035,20 @@ ${buildContext(b.id)}`;
         </div>
       </div>
 
+      <!-- Sauvegardes internes -->
+      <div class="card card-pad mb-4">
+        <h3 class="mb-2" style="font-size:var(--fs-md)">${icon("shield", 16)} Sauvegardes internes</h3>
+        <p class="text-tertiary mb-4" style="font-size:var(--fs-sm)">Points de restauration conserv\xE9s dans votre navigateur. L'application en cr\xE9e un automatiquement lorsque vos donn\xE9es changent, et avant chaque op\xE9ration sensible (import, r\xE9initialisation, restauration).</p>
+        <label class="flex items-center gap-2 mb-4" style="cursor:pointer;font-size:var(--fs-sm)">
+          <input type="checkbox" id="auto-backup" ${autoBackup ? "checked" : ""}>
+          <span>Sauvegarde automatique</span>
+        </label>
+        <div class="flex gap-2 mb-2" style="flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" id="create-backup">${icon("save", 15)} Cr\xE9er une sauvegarde maintenant</button>
+        </div>
+        <div id="backup-list">${backupRows}</div>
+      </div>
+
       <!-- Zone de danger -->
       <div class="card card-pad" style="border-color:var(--danger-soft)">
         <h3 class="mb-2" style="font-size:var(--fs-md);color:var(--danger)">${icon("alert", 16)} Zone sensible</h3>
@@ -5991,6 +6092,7 @@ ${buildContext(b.id)}`;
         const text = await file.text();
         const payload = JSON.parse(text);
         if (!await confirmDialog({ title: "Importer", message: "Remplacer les donn\xE9es actuelles par le contenu du fichier ?", confirmText: "Importer", danger: true })) return;
+        await createBackup("pre-import");
         await importAll(payload, "replace");
         await loadAll();
         toast("Donn\xE9es import\xE9es", { type: "success" });
@@ -6002,6 +6104,7 @@ ${buildContext(b.id)}`;
     });
     root.querySelector("#load-demo").addEventListener("click", async () => {
       if (!await confirmDialog({ title: "Recharger la d\xE9mo", message: "Remplacer toutes les donn\xE9es actuelles par le jeu de d\xE9monstration ?", confirmText: "Recharger", danger: true })) return;
+      await createBackup("pre-demo");
       await resetAll();
       await seedDatabase();
       await loadAll();
@@ -6010,7 +6113,8 @@ ${buildContext(b.id)}`;
       renderSettings();
     });
     root.querySelector("#reset-all").addEventListener("click", async () => {
-      if (!await confirmDialog({ title: "Tout r\xE9initialiser", message: "Cette action supprime d\xE9finitivement toutes vos donn\xE9es. Continuer ?", confirmText: "Tout supprimer", danger: true })) return;
+      if (!await confirmDialog({ title: "Tout r\xE9initialiser", message: "Cette action supprime toutes vos donn\xE9es. Une sauvegarde interne sera conserv\xE9e pour pouvoir revenir en arri\xE8re. Continuer ?", confirmText: "Tout supprimer", danger: true })) return;
+      await createBackup("pre-reset");
       await resetAll();
       await setSetting("seeded", false);
       await loadAll();
@@ -6018,6 +6122,35 @@ ${buildContext(b.id)}`;
       document.dispatchEvent(new CustomEvent("data-changed"));
       location.hash = "/";
     });
+    root.querySelector("#auto-backup").addEventListener("change", async (e) => {
+      await setSetting("autoBackup", e.target.checked);
+      toast(e.target.checked ? "Sauvegarde automatique activ\xE9e" : "Sauvegarde automatique d\xE9sactiv\xE9e", { type: "success" });
+    });
+    root.querySelector("#create-backup").addEventListener("click", async () => {
+      await createBackup("manual");
+      toast("Sauvegarde interne cr\xE9\xE9e", { type: "success" });
+      renderSettings();
+    });
+    root.querySelectorAll("[data-restore]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.dataset.restore;
+      if (!await confirmDialog({ title: "Restaurer la sauvegarde", message: "Remplacer les donn\xE9es actuelles par cette sauvegarde ? L'\xE9tat actuel sera lui-m\xEAme sauvegard\xE9 au pr\xE9alable.", confirmText: "Restaurer", danger: true })) return;
+      try {
+        await restoreBackup(id);
+        await loadAll();
+        toast("Sauvegarde restaur\xE9e", { type: "success" });
+        document.dispatchEvent(new CustomEvent("data-changed"));
+        renderSettings();
+      } catch (err) {
+        toast("Restauration impossible : " + err.message, { type: "error" });
+      }
+    }));
+    root.querySelectorAll("[data-del-backup]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.dataset.delBackup;
+      if (!await confirmDialog({ title: "Supprimer la sauvegarde", message: "Supprimer d\xE9finitivement cette sauvegarde interne ?", confirmText: "Supprimer", danger: true })) return;
+      await deleteBackup(id);
+      toast("Sauvegarde supprim\xE9e", { type: "success" });
+      renderSettings();
+    }));
   }
   function registerSettings() {
     route("/reglages", renderSettings, { title: "R\xE9glages", icon: "settings", nav: true });
@@ -6193,6 +6326,41 @@ ${buildContext(b.id)}`;
       });
     });
   }
+  var AUTO_BACKUP_MIN_INTERVAL = 10 * 60 * 1e3;
+  var AUTO_BACKUP_BOOT_STALE = 12 * 60 * 60 * 1e3;
+  var _lastAutoBackup = 0;
+  var _autoBackupTimer = null;
+  function autoBackupEnabled() {
+    return getSetting("autoBackup") !== false;
+  }
+  function hasUserData() {
+    return DATA_STORES.some((n) => n !== "settings" && Array.isArray(cache[n]) && cache[n].length > 0);
+  }
+  async function maybeAutoBackup(force) {
+    if (!autoBackupEnabled() || !hasUserData()) return;
+    const now = Date.now();
+    if (!force && now - _lastAutoBackup < AUTO_BACKUP_MIN_INTERVAL) return;
+    _lastAutoBackup = now;
+    try {
+      await createBackup("auto");
+    } catch (e) {
+      console.warn("Sauvegarde automatique impossible", e);
+    }
+  }
+  async function initAutoBackup() {
+    const last = await latestBackupAt();
+    if (!last || Date.now() - new Date(last).getTime() > AUTO_BACKUP_BOOT_STALE) {
+      await maybeAutoBackup(true);
+    } else {
+      _lastAutoBackup = new Date(last).getTime();
+    }
+    subscribe("*", (type) => {
+      if (!type || type === "settings" || !DATA_STORES.includes(type)) return;
+      clearTimeout(_autoBackupTimer);
+      _autoBackupTimer = setTimeout(() => maybeAutoBackup(false), 4e3);
+    });
+  }
+
   async function boot() {
     await openDB();
     const seeded = await get("settings", "seeded");
@@ -6225,6 +6393,7 @@ ${buildContext(b.id)}`;
       });
     }
     document.getElementById("boot-loader")?.remove();
+    initAutoBackup();
   }
   boot().catch((err) => {
     console.error("Erreur de d\xE9marrage", err);
