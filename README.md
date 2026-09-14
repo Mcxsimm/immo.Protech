@@ -68,9 +68,54 @@ peut réduire la variété), l'application le **dit** au lieu de le masquer.
 - Les **restes prévisibles** sont signalés : ce que le conditionnement vous
   oblige à acheter en trop ;
 - Un **budget indicatif** est calculé, global et par portion ;
-- Export par copie, téléchargement `.txt` ou impression.
+- Export par copie, téléchargement `.txt` ou impression ;
+- **Envoi vers l'app Rappels de l'iPhone** (voir ci-dessous).
 
-### 5. Le reste
+### 5. La liste part dans Rappels (iPhone, iPad, Mac)
+
+Apple n'offre aucun format d'import direct pour Rappels. Semainier propose
+donc les deux seuls chemins réellement fiables :
+
+- **Via Raccourcis** — un bouton ouvre l'app Raccourcis et lui passe la liste ;
+  un raccourci de quatre actions, à créer une fois (la marche à suivre est
+  dépliable dans l'application), découpe le texte ligne par ligne et crée un
+  rappel par article dans la liste de votre choix.
+- **Par copie** — un bouton copie la liste, une ligne par article ; collée
+  dans une liste Rappels, chaque ligne devient un rappel distinct.
+
+Dans les deux cas les articles déjà cochés sont omis, et deux options
+permettent de préfixer chaque ligne par son rayon et d'inclure ou non les
+produits de placard. Le bouton Raccourcis copie aussi la liste au passage :
+sur un appareil sans l'app Raccourcis, rien n'est perdu.
+
+### 6. Vos propres recettes
+
+Un éditeur intégré permet d'ajouter vos recettes sans toucher au code :
+
+- **recherche d'ingrédients** parmi les 205 du catalogue, avec une quantité de
+  départ proposée selon la famille de l'aliment ;
+- **saisie pour le nombre de personnes qui vous arrange** (4 par défaut) : la
+  conversion par personne s'affiche sous chaque ligne et c'est elle qui est
+  enregistrée, pour que la recette s'adapte ensuite à n'importe quel nombre de
+  convives ;
+- **aperçu en direct** : calories, protéines, légumes, coût, type de plat
+  détecté, base féculente, compatibilité avec les régimes, allergènes et
+  repères d'équilibre se recalculent à chaque modification ;
+- **ingrédient absent du catalogue** : vous pouvez le créer (rayon, famille,
+  unité, allergènes). Les valeurs nutritionnelles sont facultatives, mais leur
+  absence est signalée, car elle fausse l'analyse ;
+- **« Adapter à ma façon »** duplique n'importe quelle recette du catalogue
+  pour en faire votre version ;
+- vos recettes entrent dans la génération des semaines comme les autres, avec
+  un réglage pour les proposer souvent (sans lui, une poignée de recettes
+  maison se noierait parmi 200) ;
+- **export et import** au format JSON pour les sauvegarder, les transférer ou
+  les partager, et un bouton qui copie le code prêt à contribuer au catalogue.
+
+Vos recettes sont stockées séparément du reste : réinitialiser la semaine ou
+les réglages ne les efface jamais.
+
+### 7. Le reste
 - Les 200 recettes sont consultables et filtrables, avec ingrédients
   automatiquement mis à l'échelle du nombre de convives, étapes, valeurs
   nutritionnelles et repères d'équilibre ;
@@ -122,6 +167,7 @@ assets/js/nutrition.js      moteur de déduction (profil d'une recette)
 assets/js/planner.js        génération et optimisation de la semaine
 assets/js/shopping.js       agrégation et optimisation de la liste de courses
 assets/js/store.js          persistance locale
+assets/js/custom.js         recettes et ingrédients créés par l'utilisateur
 assets/js/app.js            interface
 scripts/validate.js         contrôle de cohérence de la base
 sw.js                       fonctionnement hors connexion
@@ -143,21 +189,37 @@ pas se déclarer « végétarienne » tout en contenant des lardons.
 
 1. **Filtrage** : on ne garde que les recettes compatibles avec les régimes,
    allergies, aversions, temps et niveau demandés ;
-2. **Tirage pondéré** : l'envie exprimée et la saison augmentent les chances
-   d'une recette ; plusieurs centaines de semaines candidates sont tirées ;
-3. **Notation** : chaque semaine candidate reçoit une note qui agrège les
-   repères nutritionnels, la variété et l'anti-gaspi ;
-4. **Amélioration locale** : on remplace des repas un à un tant que la note
-   progresse, en respectant les repas verrouillés.
+2. **Amorçage** : si l'envie désigne clairement un plat (« gratin de courgettes
+   de mamie »), ce plat est placé d'office, à hauteur du nombre de repas
+   demandé pour cette envie. Sans cela, une recette nommément réclamée n'était
+   retenue que trois fois sur vingt ;
+3. **Tirage pondéré** : l'envie, la saison et vos recettes personnelles
+   augmentent les chances d'une recette ; plusieurs centaines de semaines
+   candidates sont tirées ;
+4. **Notation** : chaque semaine candidate reçoit une note qui agrège les
+   repères nutritionnels, la variété et l'anti-gaspi. Le bonus d'envie est
+   **plafonné au nombre de repas demandé** : un plat de plus dans le même goût
+   ne rapporte rien, et ne peut donc pas évincer les repères d'équilibre ;
+5. **Amélioration locale** : on remplace des repas un à un tant que la note
+   progresse, en respectant les repas verrouillés et les plats amorcés.
 
 Le tirage est **déterministe à graine fixée** : à graine égale, même semaine —
 ce qui rend les résultats reproductibles et testables.
+
+Sur 30 semaines tirées dans chacun des cas testés (sans envie, envie
+d'ingrédient, envie de cuisine, régime végétarien, 7 repas), tous les repères
+d'équilibre sont atteints.
 
 ---
 
 ## Ajouter une recette
 
-Ajoutez une entrée dans `assets/data/recipes.js` :
+**Depuis l'application** : onglet *Recettes* → **Créer une recette**. C'est la
+voie normale ; rien à installer, et la recette est immédiatement utilisable
+dans vos semaines.
+
+**Dans le catalogue livré**, pour proposer une recette à tout le monde :
+ajoutez une entrée dans `assets/data/recipes.js`.
 
 ```js
 { id: 'poulet_citron', n: 'Poulet au citron', cu: 'France',
@@ -171,6 +233,9 @@ Ajoutez une entrée dans `assets/data/recipes.js` :
   l'unité canonique de l'ingrédient (g, ml ou pièce) ;
 - `t` minutes, `d` difficulté de 1 à 3, `s` saisons (omis = toute l'année) ;
 - rien d'autre à renseigner : le reste est déduit.
+
+Le bouton **Copier le code source**, dans l'éditeur, produit directement ce
+bloc à partir d'une recette que vous avez créée dans l'application.
 
 Un ingrédient absent du catalogue s'ajoute dans `assets/data/ingredients.js`.
 Lancez ensuite `node scripts/validate.js`.

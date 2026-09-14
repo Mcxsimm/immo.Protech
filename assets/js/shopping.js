@@ -242,8 +242,41 @@
     return L.join('\n');
   }
 
+  /**
+   * Liste "une ligne par article", destinée aux applications de rappels et de
+   * notes : pas de titre, pas de puce, pas de section — chaque ligne doit
+   * pouvoir devenir une tâche telle quelle.
+   * @param {object} liste  résultat de build()
+   * @param {object} [opts] { rayons: préfixer par rayon,
+   *                          placard: inclure les produits de placard non cochés,
+   *                          coches: {id:1} articles déjà pris, à omettre }
+   */
+  function lignesArticles(liste, opts) {
+    opts = opts || {};
+    var coches = opts.coches || {};
+    var lignes = [];
+
+    function ajouter(groupes) {
+      groupes.forEach(function (r) {
+        r.items.forEach(function (i) {
+          if (coches[i.id] || i.possede) return;
+          lignes.push((opts.rayons ? r.n + ' · ' : '') + i.n + ' — ' + i.texte);
+        });
+      });
+    }
+
+    ajouter(liste.rayons);
+    if (opts.placard) ajouter(liste.placardRayons);
+    return lignes;
+  }
+
+  function texteRappels(liste, opts) {
+    return lignesArticles(liste, opts).join('\n');
+  }
+
   global.MP_SHOPPING = {
     build: build, texte: texte, formatQte: formatQte,
+    lignesArticles: lignesArticles, texteRappels: texteRappels,
     arrondiAchat: arrondiAchat, pluriel: pluriel, plurielUnite: plurielUnite, nb: nb
   };
 })(typeof window !== 'undefined' ? window : globalThis);
