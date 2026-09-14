@@ -27,8 +27,11 @@
     };
   }
 
+  /* Les ligatures œ et æ ne sont pas décomposées par NFD : sans ce
+     remplacement, « bœuf » et « œuf » resteraient introuvables. */
   function normalise(s) {
     return (s || '').toString().toLowerCase()
+      .replace(/œ/g, 'oe').replace(/æ/g, 'ae')
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, ' ').trim();
   }
@@ -236,7 +239,18 @@
       var vise = o.envieCible;
       if (matchs < vise) score -= 20 * (vise - matchs);
       else score += 6;
-      recettes.forEach(function (r) { score += Math.min(scoreEnvie(r, o.envieMots), 6) * 0.7; });
+      /* Seules les "vise" meilleures correspondances sont récompensées :
+         un repas de plus dans le même goût ne doit pas payer davantage que
+         le respect des repères nutritionnels. */
+      recettes.map(function (r) { return Math.min(scoreEnvie(r, o.envieMots), 12); })
+        .sort(function (a, b) { return b - a; })
+        .slice(0, Math.max(1, vise))
+        .forEach(function (s) { score += s * 1.1; });
+    }
+
+    /* 4 bis. Recettes maison : l'utilisateur les a saisies pour les cuisiner. */
+    if (o.favoriserPerso) {
+      score += recettes.filter(function (r) { return r.perso; }).length * 3.5;
     }
 
     /* 5. Anti-gaspi : reutiliser un produit frais evite une botte de persil
@@ -284,6 +298,7 @@
       verrous: opts.verrous || [],
       exclusRecettes: opts.exclusRecettes || [],
       interdits: opts.interdits || [],
+      favoriserPerso: opts.favoriserPerso !== false,
       seed: opts.seed || Math.floor(Math.random() * 1e9)
     };
     o.envieMots = etendreEnvie(normalise(o.envie).split(' ').filter(function (m) { return m.length >= 3; }));
@@ -291,7 +306,7 @@
     o.envieCible = !o.envieMots.length ? 0
       : o.envieIntensite === 'toute' ? o.nbRepas
         : o.envieIntensite === 'plusieurs' ? Math.max(2, Math.round(o.nbRepas / 2))
-          : Math.min(2, o.nbRepas);
+          : 1;
 
     var rand = rng(o.seed);
     var obj = objectifs(o.nbRepas, o);
@@ -325,7 +340,8 @@
     var poids = {};
     pool.forEach(function (r) {
       var w = 1;
-      w += Math.min(scoreEnvie(r, o.envieMots), 8) * 0.8;
+      w += Math.min(scoreEnvie(r, o.envieMots), 12) * 1.2;
+      if (r.perso && o.favoriserPerso) w *= 6;
       if (o.prefSaison) {
         if (!r.s) w += 0.4;
         else if (r.s.indexOf(o.saison) >= 0) w += 1.6;
@@ -334,6 +350,20 @@
       if (o.exclusRecettes.indexOf(r.id) >= 0) w *= 0.12;
       poids[r.id] = Math.max(0.08, w);
     });
+
+    /* Correspondances fortes : au moins deux mots retrouvés dans le nom, ou
+       le meilleur score du catalogue s'il est déjà élevé. */
+    var meilleuresEnvies = [];
+    if (o.envieMots.length) {
+      var scores = pool.map(function (r) { return { r: r, s: scoreEnvie(r, o.envieMots) }; });
+      var maxScore = scores.reduce(function (m, x) { return Math.max(m, x.s); }, 0);
+      if (maxScore >= 5) {
+        meilleuresEnvies = scores
+          .filter(function (x) { return x.s >= Math.max(5, maxScore * 0.75); })
+          .sort(function (x, y) { return y.s - x.s; })
+          .map(function (x) { return x.r; });
+      }
+    }
 
     function tirer(dejaPris) {
       var dispo = pool.filter(function (r) { return !dejaPris[r.id]; });
@@ -358,9 +388,23 @@
     function construire() {
       var pris = {}, out = [];
       Object.keys(fixes).forEach(function (i) { pris[fixes[i].id] = 1; });
+
+      /* Les meilleures réponses à l'envie sont placées d'abord, à hauteur du
+         nombre de repas demandé pour cette envie. */
+      var amorces = [];
+      if (meilleuresEnvies.length && o.envieCible > 0) {
+        var candidats = meilleuresEnvies.filter(function (r) { return !pris[r.id]; });
+        /* Mélange pondéré : la meilleure correspondance reste la plus probable. */
+        candidats = candidats.slice(0, Math.max(3, o.envieCible + 2))
+          .map(function (r, k) { return { r: r, k: k + rand() * 2 }; })
+          .sort(function (x, y) { return x.k - y.k; })
+          .map(function (x) { return x.r; });
+        amorces = candidats.slice(0, Math.min(o.envieCible, o.nbRepas - Object.keys(fixes).length));
+      }
+
       for (var i = 0; i < o.nbRepas; i++) {
         if (fixes[i]) { out[i] = fixes[i]; continue; }
-        var r = tirer(pris);
+        var r = amorces.length ? amorces.shift() : tirer(pris);
         if (!r) return null;
         pris[r.id] = 1;
         out[i] = r;
@@ -390,7 +434,8 @@
       var test = meilleur.slice();
       test[idx] = remplacant;
       var noteTest = noter(test, o, obj);
-      if (noteTest.score > meilleurNote.score) { meilleur = test; meilleurNote = noteTest; }
+      var marge = meilleuresEnvies.indexOf(meilleur[idx]) >= 0 ? 12 : 0;
+      if (noteTest.score > meilleurNote.score + marge) { meilleur = test; meilleurNote = noteTest; }
     }
 
     var repas = meilleur.map(function (r, i) {

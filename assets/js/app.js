@@ -10,7 +10,12 @@
 
   var P = window.MP_PLANNER, N = window.MP_NUTRITION,
     S = window.MP_SHOPPING, ING = window.MP_INGREDIENTS,
-    RECETTES = window.MP_RECIPES, STORE = window.MP_STORE;
+    RECETTES = window.MP_RECIPES, STORE = window.MP_STORE,
+    C = window.MP_CUSTOM;
+
+  /* Les recettes et ingrédients personnels rejoignent les catalogues avant
+     tout rendu : le reste de l'application les traite comme les autres. */
+  C.charger();
 
   var JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche',
     'J8', 'J9', 'J10', 'J11', 'J12', 'J13', 'J14'];
@@ -39,6 +44,16 @@
     { id: 'gluten', n: 'Gluten' }
   ];
 
+  var NOM_ALLERGENE = {
+    fruits_a_coque: 'fruits à coque', poisson: 'poisson', crustaces: 'crustacés',
+    mollusques: 'mollusques', oeuf: 'œuf', soja: 'soja', sesame: 'sésame',
+    moutarde: 'moutarde', lactose: 'lait', gluten: 'gluten'
+  };
+
+  function listeAllergenes(ids) {
+    return ids.map(function (x) { return NOM_ALLERGENE[x] || x.replace(/_/g, ' '); }).join(', ');
+  }
+
   var ENVIES_RAPIDES = ['Poulet', 'Poisson', 'Pâtes', 'Asiatique', 'Italien', 'Végétarien',
     'Épicé', 'Réconfortant', 'Rapide', 'Léger', 'Four', 'Soupe'];
 
@@ -48,13 +63,17 @@
     reglages: {
       nbRepas: 5, convives: 4, envie: '', envieIntensite: 'un_peu',
       regimes: [], allergenes: [], exclusions: [],
-      tempsMax: 0, difficulteMax: 0, prefSaison: true, budgetSemaine: 0
+      tempsMax: 0, difficulteMax: 0, prefSaison: true, budgetSemaine: 0,
+      favoriserPerso: true,
+      rappelsRaccourci: 'Courses Semainier', rappelsRayons: false, rappelsPlacard: false
     },
     plan: null,
     coches: {},
     possede: {},
     recherche: '',
     filtreFamille: '',
+    filtrePerso: false,
+    editeur: null,
     theme: 'auto'
   };
 
@@ -83,6 +102,7 @@
       possede: etat.possede,
       theme: etat.theme,
       onglet: etat.onglet,
+      editeur: etat.editeur,
       plan: etat.plan ? {
         repas: etat.plan.repas.map(function (r) {
           return { id: r.id, convives: r.convives, verrouille: r.verrouille };
@@ -97,6 +117,13 @@
 
   function sauver() { STORE.ecrire(serialiser()); }
 
+  /* Écriture différée : inutile de sérialiser à chaque caractère frappé. */
+  var minuteurSauvegarde = null;
+  function sauverDiffere() {
+    clearTimeout(minuteurSauvegarde);
+    minuteurSauvegarde = setTimeout(sauver, 600);
+  }
+
   function restaurer() {
     var d = STORE.lire();
     if (!d) return;
@@ -105,6 +132,8 @@
     etat.possede = d.possede || {};
     etat.theme = d.theme || 'auto';
     if (d.onglet) etat.onglet = d.onglet;
+    /* Un formulaire laissé en cours de saisie est retrouvé tel quel. */
+    if (d.editeur && d.editeur.i) etat.editeur = d.editeur;
     if (d.plan && d.plan.repas) {
       var repas = d.plan.repas.map(function (r, i) {
         var rec = RECETTES.filter(function (x) { return x.id === r.id; })[0];
@@ -149,9 +178,11 @@
     var html = etat.onglet === 'planifier' ? vuePlanifier()
       : etat.onglet === 'semaine' ? vueSemaine()
         : etat.onglet === 'courses' ? vueCourses()
-          : vueRecettes();
+          : etat.editeur ? vueEditeur()
+            : vueRecettes();
     vue.innerHTML = html;
     majBarreBasse();
+    remplirChampsEditeur();
     window.scrollTo({ top: 0, behavior: 'instant' in document.documentElement.style ? 'instant' : 'auto' });
   }
 
@@ -243,12 +274,13 @@
       }).join('') +
       '</div></label>' +
 
-      (r.envie ? '<div class="champ"><span class="lib">Place de cette envie dans la semaine</span>' +
-        '<div class="puces">' +
-        [['un_peu', 'Un ou deux repas'], ['plusieurs', 'La moitié des repas'], ['toute', 'Toute la semaine']]
-          .map(function (i) {
-            return '<button type="button" class="puce" data-intensite="' + i[0] + '" aria-pressed="' + (r.envieIntensite === i[0]) + '">' + i[1] + '</button>';
-          }).join('') + '</div></div>' : '') +
+      '<div class="champ" id="blocIntensite"' + (r.envie.trim() ? '' : ' hidden') + '>' +
+      '<span class="lib">Place de cette envie dans la semaine</span>' +
+      '<div class="puces">' +
+      [['un_peu', 'Un ou deux repas'], ['plusieurs', 'La moitié des repas'], ['toute', 'Toute la semaine']]
+        .map(function (i) {
+          return '<button type="button" class="puce" data-intensite="' + i[0] + '" aria-pressed="' + (r.envieIntensite === i[0]) + '">' + i[1] + '</button>';
+        }).join('') + '</div></div>' +
       '</div></div>' +
 
       '<div class="section"><div class="carte carte-p">' +
@@ -289,6 +321,14 @@
       '<button type="button" class="puce" data-saison="1" aria-pressed="' + (r.prefSaison !== false) + '">Oui, ' + P.saisonCourante() + '</button>' +
       '<button type="button" class="puce" data-saison="0" aria-pressed="' + (r.prefSaison === false) + '">Peu importe</button>' +
       '</div></div>' +
+
+      (C.recettes().length ? '<div class="champ" style="margin-bottom:0;margin-top:16px">' +
+        '<span class="lib">Mes ' + C.recettes().length + ' recette(s) personnelle(s)</span>' +
+        '<span class="aide">Sans coup de pouce, quelques recettes maison se noieraient parmi les ' + RECETTES.length + ' du catalogue.</span>' +
+        '<div class="puces">' +
+        '<button type="button" class="puce" data-fav-perso="1" aria-pressed="' + (r.favoriserPerso !== false) + '">Les proposer souvent</button>' +
+        '<button type="button" class="puce" data-fav-perso="0" aria-pressed="' + (r.favoriserPerso === false) + '">Comme les autres</button>' +
+        '</div></div>' : '') +
       '</div></div>' +
 
       (manque ? '<div class="alerte-bloc" style="margin-bottom:18px"><span>⚠️</span><div>' +
@@ -465,6 +505,8 @@
       '<button class="bouton mini" data-action="decocher">↺ Tout décocher</button>' +
       '</div></div>' +
 
+      carteRappels(l) +
+
       bloc(l.rayons, false) +
 
       (l.placardRayons.length ? '<div class="carte carte-p" style="margin-top:22px">' +
@@ -493,10 +535,12 @@
   /* ------------------------------------------------------ onglet Recettes */
   function vueRecettes() {
     var q = P.normalise(etat.recherche);
+    var perso = C.recettes();
     var familles = [['', 'Toutes'], ['viande_blanche', 'Viande blanche'], ['viande_rouge', 'Viande rouge'],
     ['poisson', 'Poisson & fruits de mer'], ['vegetarien', 'Végétarien']];
 
     var liste = RECETTES.filter(function (r) {
+      if (etat.filtrePerso && !r.perso) return false;
       var p = N.profile(r);
       if (etat.filtreFamille && N.familleProt(p.proteine) !== etat.filtreFamille) return false;
       if (!q) return true;
@@ -508,23 +552,75 @@
 
     return '<div class="section">' +
       '<div class="titre-section"><h2>Les ' + RECETTES.length + ' recettes</h2>' +
-      '<span class="petit doux">' + liste.length + ' affichée(s)</span></div>' +
+      '<span class="petit doux">' + liste.length + ' affichée(s)' +
+      (perso.length ? ' · ' + perso.length + ' à vous' : '') + '</span></div>' +
+
+      '<div class="actions" style="margin-bottom:14px">' +
+      '<button class="bouton principal" data-action="ed-nouvelle">➕ Créer une recette</button>' +
+      '<button class="bouton mini" data-action="perso-importer">⬆️ Importer</button>' +
+      (perso.length ? '<button class="bouton mini" data-action="perso-exporter">⬇️ Exporter mes recettes</button>' : '') +
+      '</div>' +
+      '<input type="file" id="fichierImport" accept="application/json,.json" hidden>' +
+
       '<input type="text" id="recherche" value="' + esc(etat.recherche) + '" placeholder="Rechercher un plat, un ingrédient, une cuisine…" autocomplete="off">' +
       '<div class="puces" style="margin:12px 0 18px">' +
       familles.map(function (f) {
-        return '<button type="button" class="puce" data-famille="' + f[0] + '" aria-pressed="' + (etat.filtreFamille === f[0]) + '">' + esc(f[1]) + '</button>';
-      }).join('') + '</div>' +
+        return '<button type="button" class="puce" data-famille="' + f[0] + '" aria-pressed="' + (etat.filtreFamille === f[0] && !etat.filtrePerso) + '">' + esc(f[1]) + '</button>';
+      }).join('') +
+      (perso.length ? '<button type="button" class="puce" data-perso-filtre="1" aria-pressed="' + etat.filtrePerso + '">★ Mes recettes</button>' : '') +
+      '</div>' +
       (liste.length ? '<div class="liste-recettes">' + liste.map(function (r) {
         var p = N.profile(r);
         return '<button class="carte fiche" data-recette="' + esc(r.id) + '">' +
-          '<h3>' + esc(r.n) + '</h3>' +
+          '<h3>' + (r.perso ? '★ ' : '') + esc(r.n) + '</h3>' +
           '<div class="tags"><span class="tag vert">' + esc(N.LABEL_PROT[p.proteine]) + '</span>' +
           '<span class="tag">' + esc(r.cu) + '</span>' +
           '<span class="tag">⏱ ' + r.t + ' min</span>' +
-          '<span class="tag">' + p.nutrition.kcal + ' kcal</span></div>' +
+          '<span class="tag">' + p.nutrition.kcal + ' kcal</span>' +
+          (r.perso && C.incomplete(r) ? '<span class="tag orange">analyse incomplète</span>' : '') + '</div>' +
           '</button>';
-      }).join('') + '</div>' : '<div class="vide"><span class="emoji">🔍</span><p>Aucune recette ne correspond à cette recherche.</p></div>') +
+      }).join('') + '</div>'
+        : '<div class="vide"><span class="emoji">🔍</span><p>Aucune recette ne correspond à cette recherche.</p>' +
+        '<button class="bouton principal" data-action="ed-nouvelle">➕ Créer cette recette</button></div>') +
       '</div>';
+  }
+
+  /* ---------------------------------------------- envoi vers l'app Rappels */
+  /* Apple ne propose pas d'import direct dans Rappels. Deux chemins fiables :
+     un raccourci qui découpe le texte ligne par ligne (le plus sûr, à créer
+     une fois), et la copie pour un collage manuel. */
+  function carteRappels(l) {
+    var r = etat.reglages;
+    var lignes = S.lignesArticles(l, { rayons: r.rappelsRayons, placard: r.rappelsPlacard, coches: etat.coches });
+    return '<div class="carte carte-p no-print" style="margin-bottom:18px">' +
+      '<h3>📱 Envoyer vers l’app Rappels</h3>' +
+      '<p class="petit doux">' + lignes.length + ' article(s) à envoyer — les articles déjà cochés sont omis.</p>' +
+
+      '<div class="champ"><span class="lib">Contenu</span><div class="puces">' +
+      '<button type="button" class="puce" data-rappels-opt="rayons" aria-pressed="' + !!r.rappelsRayons + '">Préfixer par le rayon</button>' +
+      '<button type="button" class="puce" data-rappels-opt="placard" aria-pressed="' + !!r.rappelsPlacard + '">Inclure les produits de placard</button>' +
+      '</div></div>' +
+
+      '<div class="actions">' +
+      '<button class="bouton principal" data-action="rappels-raccourci">⚡️ Envoyer via Raccourcis</button>' +
+      '<button class="bouton" data-action="rappels-copier">📋 Copier les ' + lignes.length + ' lignes</button>' +
+      '</div>' +
+
+      '<details style="margin-top:14px">' +
+      '<summary class="petit" style="cursor:pointer"><b>Première utilisation : créer le raccourci (2 minutes)</b></summary>' +
+      '<div class="petit" style="margin-top:10px">' +
+      '<ol style="padding-left:20px;margin:0 0 12px">' +
+      '<li>Ouvrez l’app <b>Raccourcis</b> sur votre iPhone, puis <b>+</b> pour un nouveau raccourci.</li>' +
+      '<li>Ajoutez l’action <b>Diviser le texte</b> : entrée = <i>Entrée du raccourci</i>, séparateur = <b>Nouvelles lignes</b>.</li>' +
+      '<li>Ajoutez <b>Répéter pour chaque élément</b> sur le résultat de la division.</li>' +
+      '<li>À l’intérieur de la boucle, ajoutez <b>Ajouter un nouveau rappel</b> : titre = <i>Élément de répétition</i>, liste = <b>Courses</b>.</li>' +
+      '<li>Nommez le raccourci exactement comme ci-dessous, puis revenez ici.</li>' +
+      '</ol>' +
+      '<label class="champ" style="margin-bottom:8px"><span class="lib">Nom exact du raccourci</span>' +
+      '<input type="text" id="nomRaccourci" value="' + esc(r.rappelsRaccourci) + '" autocomplete="off"></label>' +
+      '<p class="doux" style="margin:0">Sans raccourci, utilisez <b>Copier</b> : dans Rappels, ouvrez une liste et collez — chaque ligne devient un rappel distinct. ' +
+      'Le bouton Raccourcis ne fonctionne que depuis un iPhone, un iPad ou un Mac.</p>' +
+      '</div></details></div>';
   }
 
   /* --------------------------------------------------------------- modale */
@@ -580,12 +676,15 @@
       }).join('') +
 
       (p.allergenes.length ? '<p class="petit doux" style="margin-top:16px">Allergènes : ' +
-        esc(p.allergenes.join(', ').replace(/_/g, ' ')) + '</p>' : '') +
+        esc(listeAllergenes(p.allergenes)) + '</p>' : '') +
 
       '<div class="actions" style="margin-top:20px">' +
       (auPlan
         ? '<button class="bouton" data-remplacer="' + auPlan.index + '" data-fermer="1">↻ Remplacer ce repas</button>'
         : (etat.plan ? '<button class="bouton principal" data-ajouter="' + esc(r.id) + '">+ Ajouter à ma semaine</button>' : '')) +
+      (r.perso
+        ? '<button class="bouton" data-ed-modifier="' + esc(r.id) + '">✎ Modifier</button>'
+        : '<button class="bouton" data-ed-dupliquer="' + esc(r.id) + '">⧉ Adapter à ma façon</button>') +
       '<button class="bouton" data-fermer="1">Fermer</button>' +
       '</div></div></div></div>';
 
@@ -602,6 +701,321 @@
     document.body.style.overflow = '';
   }
 
+
+  /* ====================== CRÉATION / ÉDITION DE RECETTE ================== */
+
+  /* Quantité de départ proposée quand on ajoute un ingrédient : le bon ordre
+     de grandeur évite d'avoir à tout saisir à partir de zéro. */
+  function quantiteParDefaut(ing, base) {
+    var parPersonne;
+    if (ing.u === 'pc') parPersonne = (ing.pc || 0) >= 80 ? 0.5 : (ing.ct === 'oeuf' ? 2 : 1);
+    else if (ing.ct === 'viande_rouge' || ing.ct === 'viande_blanche') parPersonne = 140;
+    else if (ing.ct === 'poisson_gras' || ing.ct === 'poisson_blanc' || ing.ct === 'fruits_mer') parPersonne = 150;
+    else if (ing.ct === 'feculent') parPersonne = 80;
+    else if (ing.ct === 'legumineuse') parPersonne = 100;
+    else if (ing.ct === 'legume') parPersonne = 150;
+    else if (ing.ct === 'fromage') parPersonne = 30;
+    else if (ing.ct === 'laitage') parPersonne = 50;
+    else if (ing.ct === 'matiere_grasse') parPersonne = 8;
+    else if (ing.ct === 'epice') parPersonne = 3;
+    else if (ing.ct === 'aromate') parPersonne = 5;
+    else if (ing.ct === 'oleagineux') parPersonne = 15;
+    else parPersonne = 50;
+    var q = parPersonne * base;
+    return ing.u === 'pc' ? Math.round(q * 4) / 4 : Math.round(q);
+  }
+
+  function editeurVide() {
+    return { id: null, n: '', cu: '', tags: '', t: 30, d: 1, s: [], base: 4, i: [], e: '', rechIng: '', nouvelIng: null };
+  }
+
+  /* Charge une recette existante dans le formulaire. Les quantités, stockées
+     par personne, sont ramenées à la base de saisie choisie. */
+  function editeurDepuis(recette, base) {
+    base = base || 4;
+    return {
+      id: recette.id, n: recette.n, cu: recette.cu, tags: (recette.tags || []).join(', '),
+      t: recette.t, d: recette.d, s: (recette.s || []).slice(), base: base,
+      i: recette.i.map(function (l) { return [l[0], Math.round(l[1] * base * 1000) / 1000]; }),
+      e: (recette.e || []).join('\n'), rechIng: '', nouvelIng: null
+    };
+  }
+
+  /* Recette provisoire, en quantités par personne, pour l'aperçu en direct. */
+  function recetteProvisoire(ed) {
+    return {
+      id: ed.id || '_apercu', n: ed.n || 'Nouvelle recette', cu: ed.cu || 'Maison',
+      tags: [], t: ed.t, d: ed.d,
+      i: ed.i.filter(function (l) { return l[1] > 0; })
+        .map(function (l) { return [l[0], l[1] / (ed.base || 1)]; }),
+      e: []
+    };
+  }
+
+  function vueEditeur() {
+    var ed = etat.editeur;
+    var cuisines = {};
+    RECETTES.forEach(function (r) { cuisines[r.cu] = 1; });
+
+    return '<div class="section">' +
+      '<div class="titre-section"><h2>' + (ed.id ? 'Modifier la recette' : 'Nouvelle recette') + '</h2>' +
+      '<span class="petit doux">Vos recettes rejoignent les 200 autres et entrent dans la génération des semaines.</span></div>' +
+
+      '<div class="grille grille-2">' +
+
+      /* ------------------------------ colonne saisie ------------------- */
+      '<div>' +
+      '<div class="carte carte-p" style="margin-bottom:16px">' +
+      '<label class="champ"><span class="lib">Nom du plat</span>' +
+      '<input type="text" id="edNom" value="' + esc(ed.n) + '" placeholder="ex. Gratin de courgettes de mamie" autocomplete="off"></label>' +
+
+      '<div class="grille grille-2">' +
+      '<label class="champ"><span class="lib">Type de cuisine</span>' +
+      '<input type="text" id="edCuisine" list="listeCuisines" value="' + esc(ed.cu) + '" placeholder="France, Italie, Maison…" autocomplete="off">' +
+      '<datalist id="listeCuisines">' + Object.keys(cuisines).sort().map(function (c) {
+        return '<option value="' + esc(c) + '">';
+      }).join('') + '</datalist></label>' +
+      '<label class="champ"><span class="lib">Temps total (minutes)</span>' +
+      '<input type="number" id="edTemps" min="1" max="600" value="' + ed.t + '"></label>' +
+      '</div>' +
+
+      '<div class="champ"><span class="lib">Difficulté</span><div class="puces">' +
+      ['Très simple', 'Simple', 'Intermédiaire'].map(function (n, k) {
+        return '<button type="button" class="puce" data-ed-diff="' + (k + 1) + '" aria-pressed="' + (ed.d === k + 1) + '">' + n + '</button>';
+      }).join('') + '</div></div>' +
+
+      '<div class="champ"><span class="lib">Saisons</span>' +
+      '<span class="aide">Aucune sélection = plat de toute l’année.</span><div class="puces">' +
+      P.SAISONS.map(function (s) {
+        return '<button type="button" class="puce" data-ed-saison="' + esc(s) + '" aria-pressed="' + (ed.s.indexOf(s) >= 0) + '">' + esc(s) + '</button>';
+      }).join('') + '</div></div>' +
+
+      '<label class="champ" style="margin-bottom:0"><span class="lib">Mots-clés</span>' +
+      '<span class="aide">Séparés par des virgules. Ils servent à retrouver le plat et à répondre aux envies.</span>' +
+      '<input type="text" id="edTags" value="' + esc(ed.tags) + '" placeholder="gratin, réconfortant, été" autocomplete="off"></label>' +
+      '</div>' +
+
+      /* ------------------------------ ingrédients ---------------------- */
+      '<div class="carte carte-p" style="margin-bottom:16px">' +
+      '<h3>Ingrédients</h3>' +
+      '<div class="champ"><span class="lib">Je saisis les quantités pour</span>' +
+      compteurEditeur(ed.base) + '</div>' +
+
+      '<label class="champ"><span class="lib">Ajouter un ingrédient</span>' +
+      '<input type="text" id="edRechIng" value="' + esc(ed.rechIng) + '" placeholder="Tapez les premières lettres…" autocomplete="off"></label>' +
+      '<div id="edResultats">' + resultatsIngredients(ed.rechIng) + '</div>' +
+
+      '<div id="edLignes">' + lignesIngredients(ed) + '</div>' +
+      '</div>' +
+
+      (ed.nouvelIng ? formulaireIngredient(ed.nouvelIng) : '') +
+
+      /* ------------------------------ étapes --------------------------- */
+      '<div class="carte carte-p">' +
+      '<label class="champ" style="margin-bottom:0"><span class="lib">Préparation</span>' +
+      '<span class="aide">Une étape par ligne.</span>' +
+      '<textarea id="edEtapes" rows="7" placeholder="Émincer les oignons.&#10;Faire revenir 5 min.&#10;Enfourner 25 min à 190 °C."></textarea></label>' +
+      '</div>' +
+      '</div>' +
+
+      /* ------------------------------ colonne aperçu ------------------- */
+      '<div><div id="edAnalyse">' + analyseEditeur(ed) + '</div></div>' +
+      '</div>' +
+
+      '<div class="actions" style="margin-top:18px">' +
+      '<button class="bouton principal" data-action="ed-enregistrer">' + (ed.id ? 'Enregistrer les modifications' : 'Créer la recette') + '</button>' +
+      '<button class="bouton" data-action="ed-annuler">Annuler</button>' +
+      (ed.id && C.estPerso(ed.id) ? '<button class="bouton" data-action="ed-supprimer">🗑 Supprimer</button>' : '') +
+      (ed.id && C.estPerso(ed.id) ? '<button class="bouton" data-action="ed-source">⧉ Copier le code source</button>' : '') +
+      '</div>' +
+      '<p class="petit doux" style="margin-top:10px">Les quantités sont enregistrées <b>par personne</b> : la recette s’adapte ensuite automatiquement au nombre de convives de chaque repas.</p>' +
+      '</div>';
+  }
+
+  function compteurEditeur(base) {
+    return '<span class="compteur">' +
+      '<button type="button" data-ed-base="-1" aria-label="Moins"' + (base <= 1 ? ' disabled' : '') + '>−</button>' +
+      '<span class="val">' + base + '<small>' + (base > 1 ? 'personnes' : 'personne') + '</small></span>' +
+      '<button type="button" data-ed-base="1" aria-label="Plus"' + (base >= 12 ? ' disabled' : '') + '>+</button>' +
+      '</span>';
+  }
+
+  function resultatsIngredients(q) {
+    var texte = P.normalise(q);
+    if (texte.length < 2) {
+      return '<p class="petit doux" style="margin:0 0 12px">' + ING.list.length + ' ingrédients disponibles. ' +
+        '<button type="button" class="bouton mini" data-action="ed-nouvel-ingredient">+ Créer un ingrédient</button></p>';
+    }
+    var trouves = ING.list.map(function (i) {
+      var nom = P.normalise(i.n);
+      var pos = nom.indexOf(texte);
+      if (pos < 0) return null;
+      /* 0 : le nom commence par la recherche — 1 : un mot commence par elle
+         — 2 : simple occurrence au milieu d'un mot. */
+      var rang = pos === 0 ? 0 : (nom.charAt(pos - 1) === ' ' ? 1 : 2);
+      return { i: i, rang: rang, taille: nom.length };
+    }).filter(Boolean).sort(function (x, y) {
+      return x.rang - y.rang || x.taille - y.taille || x.i.n.localeCompare(y.i.n, 'fr');
+    }).slice(0, 10).map(function (x) { return x.i; });
+    if (!trouves.length) {
+      return '<div class="alerte-bloc" style="margin-bottom:12px"><span>🔍</span><div>' +
+        'Aucun ingrédient ne correspond à « ' + esc(q) +' ». ' +
+        '<button type="button" class="bouton mini" data-action="ed-nouvel-ingredient">+ Le créer</button></div></div>';
+    }
+    return '<div class="puces" style="margin-bottom:12px">' + trouves.map(function (i) {
+      var deja = etat.editeur.i.some(function (l) { return l[0] === i.id; });
+      return '<button type="button" class="puce" data-ed-ajout="' + esc(i.id) + '"' + (deja ? ' disabled' : '') + '>' +
+        (deja ? '✓ ' : '+ ') + esc(i.n) + '</button>';
+    }).join('') + '<button type="button" class="puce" data-action="ed-nouvel-ingredient">+ Autre…</button></div>';
+  }
+
+  function lignesIngredients(ed) {
+    if (!ed.i.length) {
+      return '<p class="petit doux">Aucun ingrédient pour l’instant. Cherchez-en un ci-dessus.</p>';
+    }
+    return '<ul class="ingredients">' + ed.i.map(function (l, k) {
+      var ing = ING.byId[l[0]];
+      if (!ing) return '';
+      var unite = ing.u === 'pc' ? (ing.up || 'pièce') : ing.u;
+      var parPers = ed.base ? Math.round((l[1] / ed.base) * 100) / 100 : l[1];
+      var uniteAccordee = ing.u === 'pc' ? S.plurielUnite(ing.up || 'pièce', parPers) : ing.u;
+      return '<li>' +
+        '<span style="flex:1"><b>' + esc(ing.n) + '</b>' +
+        (ing.perso && !ing.complet ? ' <span class="tag orange">valeurs inconnues</span>' : '') +
+        '<span class="detail petit doux" style="display:block">' + S.nb(parPers) + ' ' + esc(uniteAccordee) + ' par personne</span></span>' +
+        '<input type="number" class="qte-ing" data-ed-qte="' + k + '" value="' + l[1] + '" min="0" step="' + (ing.u === 'pc' ? '0.25' : '5') + '" ' +
+        'style="width:90px;text-align:right" aria-label="Quantité de ' + esc(ing.n) + '">' +
+        '<span class="q" style="min-width:58px">' + esc(unite) + '</span>' +
+        '<button type="button" class="icone-bouton" data-ed-retirer="' + k + '" aria-label="Retirer">✕</button>' +
+        '</li>';
+    }).join('') + '</ul>';
+  }
+
+  /* Aperçu en direct : c'est lui qui rend la saisie compréhensible, en
+     montrant immédiatement comment le moteur classera le plat. */
+  function analyseEditeur(ed) {
+    if (!ed.i.length) {
+      return '<div class="carte carte-p"><h3>Aperçu</h3>' +
+        '<p class="petit doux">Ajoutez des ingrédients : les valeurs nutritionnelles, le type de plat et la compatibilité avec les régimes se calculent au fur et à mesure.</p></div>';
+    }
+    var p = N.profile(recetteProvisoire(ed));
+    var nut = p.nutrition;
+    var regimes = [
+      ['vegetarien', 'Végétarien'], ['vegetalien', 'Végétalien'], ['sansGluten', 'Sans gluten'],
+      ['sansLactose', 'Sans lactose'], ['sansPorc', 'Sans porc']
+    ].filter(function (r) { return p.regimes[r[0]]; });
+
+    var manquants = ed.i.filter(function (l) {
+      var ing = ING.byId[l[0]];
+      return ing && ing.perso && !ing.complet;
+    }).length;
+
+    return '<div class="carte carte-p">' +
+      '<h3>Aperçu par portion</h3>' +
+      '<div class="stats-ligne" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px">' +
+      '<div class="stat"><b>' + nut.kcal + '</b><span>kcal</span></div>' +
+      '<div class="stat"><b>' + Math.round(nut.p) + ' g</b><span>protéines</span></div>' +
+      '<div class="stat"><b>' + p.legumesG + ' g</b><span>légumes</span></div>' +
+      '<div class="stat"><b>' + eur(p.cost) + '</b><span>par portion</span></div>' +
+      '</div>' +
+      '<div class="tags" style="margin-bottom:14px">' +
+      '<span class="tag vert">' + esc(N.LABEL_PROT[p.proteine]) + '</span>' +
+      (p.feculent ? '<span class="tag">' + esc(p.feculentBase) + '</span>' : '') +
+      regimes.map(function (r) { return '<span class="tag contour">' + r[1] + '</span>'; }).join('') +
+      (p.allergenes.length ? '<span class="tag orange">' + esc(listeAllergenes(p.allergenes)) + '</span>' : '') +
+      '</div>' +
+      p.equilibre.points.map(function (x) {
+        return '<div class="repere' + (x.ok ? '' : ' ko') + '"><span class="pastille-etat"></span>' +
+          '<span class="libelle">' + esc(x.k) + '</span><span class="petit doux">' + esc(x.cible) + '</span>' +
+          '<span class="valeur">' + esc(x.v) + '</span></div>';
+      }).join('') +
+      (manquants ? '<div class="alerte-bloc" style="margin-top:14px"><span>⚠️</span><div>' + manquants +
+        ' ingrédient(s) sans valeurs nutritionnelles : l’analyse est incomplète. Renseignez-les pour que l’équilibre de la semaine reste juste.</div></div>' : '') +
+      '</div>';
+  }
+
+  /* ------------------------ ingrédient inédit ------------------------- */
+  function formulaireIngredient(ni) {
+    return '<div class="carte carte-p" style="margin-bottom:16px;border-color:var(--vert)">' +
+      '<h3>Nouvel ingrédient</h3>' +
+      '<p class="petit doux">Les valeurs nutritionnelles sont facultatives, mais sans elles l’équilibre calculé sera faussé. Elles figurent sur l’emballage, pour 100 g.</p>' +
+      '<div class="grille grille-2">' +
+      '<label class="champ"><span class="lib">Nom</span>' +
+      '<input type="text" data-ni="n" value="' + esc(ni.n) + '" placeholder="ex. Farine de châtaigne"></label>' +
+      '<label class="champ"><span class="lib">Rayon</span><select data-ni="r">' +
+      ING.rayons.map(function (r) {
+        return '<option value="' + r.id + '"' + (ni.r === r.id ? ' selected' : '') + '>' + esc(r.n) + '</option>';
+      }).join('') + '</select></label>' +
+      '</div>' +
+      '<label class="champ"><span class="lib">Famille</span>' +
+      '<span class="aide">Elle détermine comment le plat est classé (viande rouge, poisson, légumineuse…).</span>' +
+      '<select data-ni="ct">' + C.FAMILLES.map(function (f) {
+        return '<option value="' + f.id + '"' + (ni.ct === f.id ? ' selected' : '') + '>' + esc(f.n) + '</option>';
+      }).join('') + '</select></label>' +
+      '<div class="grille grille-2">' +
+      '<label class="champ"><span class="lib">Se mesure en</span><select data-ni="u">' +
+      [['g', 'grammes'], ['ml', 'millilitres'], ['pc', 'pièces']].map(function (u) {
+        return '<option value="' + u[0] + '"' + (ni.u === u[0] ? ' selected' : '') + '>' + u[1] + '</option>';
+      }).join('') + '</select></label>' +
+      (ni.u === 'pc'
+        ? '<div class="grille grille-2"><label class="champ"><span class="lib">Poids d’une pièce (g)</span>' +
+        '<input type="number" data-ni="pc" value="' + esc(ni.pc) + '" min="1"></label>' +
+        '<label class="champ"><span class="lib">Nom de l’unité</span>' +
+        '<input type="text" data-ni="up" value="' + esc(ni.up) + '" placeholder="gousse, tranche…"></label></div>'
+        : '<label class="champ"><span class="lib">Prix indicatif (€/kg ou €/L)</span>' +
+        '<input type="number" data-ni="px" value="' + esc(ni.px) + '" min="0" step="0.1"></label>') +
+      '</div>' +
+      '<div class="champ"><span class="lib">Pour 100 g <span class="doux petit">(facultatif)</span></span>' +
+      '<div class="grille grille-3">' +
+      [['kcal', 'Calories'], ['p', 'Protéines (g)'], ['c', 'Glucides (g)'], ['l', 'Lipides (g)'], ['f', 'Fibres (g)'],
+      ['px', 'Prix €/kg']].map(function (k) {
+        if (k[0] === 'px' && ni.u === 'pc') return '<label class="champ"><span class="lib">Prix € / pièce</span><input type="number" data-ni="px" value="' + esc(ni.px) + '" min="0" step="0.1"></label>';
+        if (k[0] === 'px' && ni.u !== 'pc') return '';
+        return '<label class="champ"><span class="lib">' + k[1] + '</span>' +
+          '<input type="number" data-ni="' + k[0] + '" value="' + esc(ni[k[0]]) + '" min="0" step="0.1"></label>';
+      }).join('') + '</div></div>' +
+      '<div class="champ"><span class="lib">Allergènes</span><div class="puces">' +
+      C.ALLERGENES.map(function (al) {
+        return '<button type="button" class="puce" data-ni-al="' + al + '" aria-pressed="' + (ni.al.indexOf(al) >= 0) + '">' +
+          esc(NOM_ALLERGENE[al] || al) + '</button>';
+      }).join('') + '</div></div>' +
+      '<div class="champ" style="margin-bottom:0"><span class="lib">Produit de placard</span>' +
+      '<span class="aide">Épices, huiles, farine : rangés à part dans la liste de courses.</span><div class="puces">' +
+      '<button type="button" class="puce" data-ni-placard="1" aria-pressed="' + !!ni.pl + '">Oui</button>' +
+      '<button type="button" class="puce" data-ni-placard="0" aria-pressed="' + !ni.pl + '">Non</button></div></div>' +
+      '<div class="actions" style="margin-top:14px">' +
+      '<button class="bouton principal" data-action="ni-enregistrer">Ajouter à la recette</button>' +
+      '<button class="bouton" data-action="ni-annuler">Annuler</button>' +
+      '</div></div>';
+  }
+
+  /* Redessine les seules zones concernées, pour ne pas perdre la frappe. */
+  function majEditeur(zones) {
+    var ed = etat.editeur;
+    if (!ed) return;
+    if (!zones || zones.indexOf('resultats') >= 0) {
+      var r = document.getElementById('edResultats');
+      if (r) r.innerHTML = resultatsIngredients(ed.rechIng);
+    }
+    if (!zones || zones.indexOf('lignes') >= 0) {
+      var l = document.getElementById('edLignes');
+      if (l) l.innerHTML = lignesIngredients(ed);
+    }
+    if (!zones || zones.indexOf('analyse') >= 0) {
+      var an = document.getElementById('edAnalyse');
+      if (an) an.innerHTML = analyseEditeur(ed);
+    }
+  }
+
+  /* Les zones de texte gardent leur valeur hors du HTML rendu, pour éviter
+     que le navigateur ne réinitialise le curseur à chaque frappe. */
+  function remplirChampsEditeur() {
+    var ed = etat.editeur;
+    if (!ed) return;
+    var ta = document.getElementById('edEtapes');
+    if (ta && ta.value !== ed.e) ta.value = ed.e;
+  }
+
   /* ================================ ACTIONS ============================== */
 
   function optionsDepuisReglages(verrous, exclus) {
@@ -611,6 +1025,7 @@
       envieIntensite: r.envieIntensite, regimes: r.regimes.slice(),
       allergenes: r.allergenes.slice(), exclusions: r.exclusions.slice(),
       tempsMax: r.tempsMax, difficulteMax: r.difficulteMax,
+      favoriserPerso: r.favoriserPerso !== false,
       prefSaison: r.prefSaison !== false, budgetSemaine: r.budgetSemaine || 0,
       verrous: verrous || [], exclusRecettes: exclus || []
     };
@@ -690,15 +1105,17 @@
     return S.texte(l, etat.plan);
   }
 
-  function copier() {
-    var t = texteListe();
+  function copier() { copierTexte(texteListe(), 'Liste copiée.'); }
+
+  /** @param {string} t  @param {?string} message  null = copie silencieuse */
+  function copierTexte(t, message) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(t).then(function () { toast('Liste copiée.'); },
-        function () { copierSecours(t); });
-    } else { copierSecours(t); }
+      navigator.clipboard.writeText(t).then(function () { if (message) toast(message); },
+        function () { copierSecours(t, message); });
+    } else { copierSecours(t, message); }
   }
 
-  function copierSecours(t) {
+  function copierSecours(t, message) {
     var ta = document.createElement('textarea');
     ta.value = t;
     ta.style.position = 'fixed';
@@ -708,7 +1125,7 @@
     var ok = false;
     try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
     ta.remove();
-    toast(ok ? 'Liste copiée.' : 'Copie impossible sur ce navigateur.');
+    if (message || !ok) toast(ok ? message : 'Copie impossible sur ce navigateur.');
   }
 
   function telecharger() {
@@ -723,6 +1140,122 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
   }
 
+
+  /* -------------------------- actions de l'éditeur ---------------------- */
+
+  function ouvrirEditeur(ed) {
+    etat.editeur = ed;
+    etat.onglet = 'recettes';
+    render();
+  }
+
+  function enregistrerRecette() {
+    var ed = etat.editeur;
+    var res = C.enregistrerRecette({
+      id: ed.id && C.estPerso(ed.id) ? ed.id : null,
+      n: ed.n, cu: ed.cu, t: ed.t, d: ed.d, s: ed.s,
+      tags: (ed.tags || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean),
+      i: ed.i.filter(function (l) { return l[1] > 0; })
+        .map(function (l) { return [l[0], l[1] / (ed.base || 1)]; }),
+      e: (ed.e || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean)
+    });
+    if (!res.ok) { toast(res.erreurs[0]); return; }
+    etat.editeur = null;
+    etat.filtrePerso = true;
+    etat.recherche = '';
+    sauver();
+    render();
+    toast('Recette enregistrée : elle entrera dans vos prochaines semaines.');
+  }
+
+  function supprimerRecetteEditee() {
+    var ed = etat.editeur;
+    var utilisee = etat.plan && etat.plan.repas.some(function (r) { return r.id === ed.id; });
+    var message = 'Supprimer définitivement « ' + ed.n + ' » ?' +
+      (utilisee ? '\n\nElle figure dans votre semaine en cours : ce repas disparaîtra.' : '');
+    if (!confirm(message)) return;
+    C.supprimerRecette(ed.id);
+    if (utilisee) {
+      etat.plan.repas = etat.plan.repas
+        .filter(function (r) { return r.id !== ed.id; })
+        .map(function (r, i) { return Object.assign({}, r, { index: i }); });
+      if (!etat.plan.repas.length) etat.plan = null; else recalculerNote();
+    }
+    etat.editeur = null;
+    sauver();
+    render();
+    toast('Recette supprimée.');
+  }
+
+  function enregistrerNouvelIngredient() {
+    var ni = etat.editeur.nouvelIng;
+    var res = C.enregistrerIngredient(ni);
+    if (!res.ok) { toast(res.erreurs[0]); return; }
+    var ing = ING.byId[res.id];
+    etat.editeur.i.push([res.id, quantiteParDefaut(ing, etat.editeur.base)]);
+    etat.editeur.nouvelIng = null;
+    etat.editeur.rechIng = '';
+    render();
+    toast('« ' + ing.n + ' » ajouté' + (ing.complet ? '.' : ' — pensez à ses valeurs nutritionnelles.'));
+  }
+
+  function exporterPerso() {
+    var blob = new Blob([C.exporter()], { type: 'application/json;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var lien = document.createElement('a');
+    lien.href = url;
+    lien.download = 'mes-recettes-semainier.json';
+    document.body.appendChild(lien);
+    lien.click();
+    lien.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    toast(C.recettes().length + ' recette(s) exportée(s).');
+  }
+
+  function importerPerso(fichier) {
+    var lecteur = new FileReader();
+    lecteur.onload = function () {
+      var res = C.importer(String(lecteur.result));
+      if (!res.ok) { toast(res.erreur); return; }
+      etat.filtrePerso = true;
+      render();
+      toast(res.recettes + ' recette(s) et ' + res.ingredients + ' ingrédient(s) importés' +
+        (res.ignorees > 0 ? ' — ' + res.ignorees + ' déjà présente(s) ou incomplète(s).' : '.'));
+    };
+    lecteur.onerror = function () { toast('Lecture du fichier impossible.'); };
+    lecteur.readAsText(fichier);
+  }
+
+  /* ---------------------------- envoi vers Rappels ---------------------- */
+
+  function lignesRappels() {
+    var l = S.build(etat.plan, { placardPossede: etat.possede });
+    return S.lignesArticles(l, {
+      rayons: etat.reglages.rappelsRayons,
+      placard: etat.reglages.rappelsPlacard,
+      coches: etat.coches
+    });
+  }
+
+  function envoyerVersRaccourcis() {
+    var lignes = lignesRappels();
+    if (!lignes.length) { toast('Aucun article à envoyer.'); return; }
+    var nom = (etat.reglages.rappelsRaccourci || 'Courses Semainier').trim();
+    var url = 'shortcuts://x-callback-url/run-shortcut?name=' + encodeURIComponent(nom) +
+      '&input=text&text=' + encodeURIComponent(lignes.join('\n'));
+    if (url.length > 8000) {
+      toast('Liste trop longue pour ce transfert : utilisez la copie.');
+      return;
+    }
+    /* Sur un appareil sans l'app Raccourcis, le lien ne mène nulle part :
+       on copie donc la liste en parallèle pour ne jamais laisser l'écran vide. */
+    copierTexte(lignes.join('\n'), null);
+    window.location.href = url;
+    setTimeout(function () {
+      toast('Si Raccourcis ne s’est pas ouvert, la liste a été copiée : collez-la dans Rappels.');
+    }, 1500);
+  }
+
   /* ============================== ÉVÉNEMENTS ============================= */
 
   function basculer(liste, valeur) {
@@ -733,7 +1266,10 @@
   document.addEventListener('click', function (ev) {
     var t = ev.target.closest('[data-onglet],[data-action],[data-pas],[data-envie],[data-intensite],' +
       '[data-regime],[data-allergene],[data-aversion],[data-saison],[data-recette],[data-verrou],' +
-      '[data-remplacer],[data-convives],[data-famille],[data-fermer],[data-ajouter]');
+      '[data-remplacer],[data-convives],[data-famille],[data-fermer],[data-ajouter],' +
+      '[data-ed-diff],[data-ed-saison],[data-ed-base],[data-ed-ajout],[data-ed-retirer],' +
+      '[data-ed-modifier],[data-ed-dupliquer],[data-ni-al],[data-ni-placard],' +
+      '[data-perso-filtre],[data-rappels-opt],[data-fav-perso]');
     if (!t) return;
 
     if (t.hasAttribute('data-fermer')) {
@@ -798,10 +1334,90 @@
       return;
     }
     if (t.hasAttribute('data-saison')) { etat.reglages.prefSaison = t.getAttribute('data-saison') === '1'; sauver(); render(); return; }
+    if (t.hasAttribute('data-fav-perso')) { etat.reglages.favoriserPerso = t.getAttribute('data-fav-perso') === '1'; sauver(); render(); return; }
     if (t.hasAttribute('data-famille')) { etat.filtreFamille = t.getAttribute('data-famille'); render(); return; }
 
+    /* ----------------------------- éditeur ----------------------------- */
+    if (t.hasAttribute('data-ed-modifier')) {
+      fermerModale();
+      var rm = RECETTES.filter(function (x) { return x.id === t.getAttribute('data-ed-modifier'); })[0];
+      if (rm) ouvrirEditeur(editeurDepuis(rm, 4));
+      return;
+    }
+    if (t.hasAttribute('data-ed-dupliquer')) {
+      fermerModale();
+      var rd = RECETTES.filter(function (x) { return x.id === t.getAttribute('data-ed-dupliquer'); })[0];
+      if (rd) {
+        var copie = editeurDepuis(rd, 4);
+        copie.id = null;
+        copie.n = rd.n + ' (ma version)';
+        ouvrirEditeur(copie);
+      }
+      return;
+    }
+    if (t.hasAttribute('data-ed-diff')) { etat.editeur.d = parseInt(t.getAttribute('data-ed-diff'), 10); render(); return; }
+    if (t.hasAttribute('data-ed-saison')) { basculer(etat.editeur.s, t.getAttribute('data-ed-saison')); render(); return; }
+    if (t.hasAttribute('data-ed-base')) {
+      etat.editeur.base = Math.max(1, Math.min(12, etat.editeur.base + parseInt(t.getAttribute('data-ed-base'), 10)));
+      render();
+      return;
+    }
+    if (t.hasAttribute('data-ed-ajout')) {
+      var idAjout = t.getAttribute('data-ed-ajout');
+      if (!etat.editeur.i.some(function (l) { return l[0] === idAjout; })) {
+        etat.editeur.i.push([idAjout, quantiteParDefaut(ING.byId[idAjout], etat.editeur.base)]);
+      }
+      majEditeur();
+      sauverDiffere();
+      return;
+    }
+    if (t.hasAttribute('data-ed-retirer')) {
+      etat.editeur.i.splice(parseInt(t.getAttribute('data-ed-retirer'), 10), 1);
+      majEditeur();
+      sauverDiffere();
+      return;
+    }
+    if (t.hasAttribute('data-ni-al')) { basculer(etat.editeur.nouvelIng.al, t.getAttribute('data-ni-al')); render(); return; }
+    if (t.hasAttribute('data-ni-placard')) { etat.editeur.nouvelIng.pl = t.getAttribute('data-ni-placard') === '1'; render(); return; }
+    if (t.hasAttribute('data-perso-filtre')) {
+      etat.filtrePerso = !etat.filtrePerso;
+      if (etat.filtrePerso) etat.filtreFamille = '';
+      render();
+      return;
+    }
+    if (t.hasAttribute('data-rappels-opt')) {
+      var cle2 = t.getAttribute('data-rappels-opt') === 'rayons' ? 'rappelsRayons' : 'rappelsPlacard';
+      etat.reglages[cle2] = !etat.reglages[cle2];
+      sauver(); render();
+      return;
+    }
+
     var action = t.getAttribute('data-action');
-    if (action === 'generer') { generer(false); }
+    if (action === 'ed-nouvelle') { ouvrirEditeur(editeurVide()); }
+    else if (action === 'ed-annuler') { etat.editeur = null; render(); }
+    else if (action === 'ed-enregistrer') { enregistrerRecette(); }
+    else if (action === 'ed-supprimer') { supprimerRecetteEditee(); }
+    else if (action === 'ed-source') {
+      copierTexte(C.versSource(C.recette(etat.editeur.id)), 'Code copié : collez-le dans assets/data/recipes.js.');
+    }
+    else if (action === 'ed-nouvel-ingredient') {
+      etat.editeur.nouvelIng = {
+        n: etat.editeur.rechIng || '', r: 'legumes', u: 'g', ct: 'legume',
+        kcal: '', p: '', c: '', l: '', f: '', px: '', pc: '', up: '', al: [], pl: false
+      };
+      render();
+    }
+    else if (action === 'ni-enregistrer') { enregistrerNouvelIngredient(); }
+    else if (action === 'ni-annuler') { etat.editeur.nouvelIng = null; render(); }
+    else if (action === 'perso-exporter') { exporterPerso(); }
+    else if (action === 'perso-importer') { var f = document.getElementById('fichierImport'); if (f) f.click(); }
+    else if (action === 'rappels-raccourci') { envoyerVersRaccourcis(); }
+    else if (action === 'rappels-copier') {
+      var lr = lignesRappels();
+      if (!lr.length) { toast('Aucun article à copier.'); return; }
+      copierTexte(lr.join('\n'), lr.length + ' lignes copiées : collez-les dans une liste Rappels.');
+    }
+    else if (action === 'generer') { generer(false); }
     else if (action === 'regenerer') { generer(true); }
     else if (action === 'copier') { copier(); }
     else if (action === 'telecharger') { telecharger(); }
@@ -813,7 +1429,7 @@
       toast('Thème : ' + (etat.theme === 'auto' ? 'automatique' : etat.theme));
     }
     else if (action === 'reinitialiser') {
-      if (confirm('Effacer la semaine, la liste de courses et vos réglages ?')) {
+      if (confirm('Effacer la semaine, la liste de courses et vos réglages ?\n\nVos recettes personnelles sont conservées.')) {
         STORE.effacer();
         etat.plan = null; etat.coches = {}; etat.possede = {};
         etat.reglages = { nbRepas: 5, convives: 4, envie: '', envieIntensite: 'un_peu', regimes: [], allergenes: [], exclusions: [], tempsMax: 0, difficulteMax: 0, prefSaison: true, budgetSemaine: 0 };
@@ -836,20 +1452,71 @@
       if (el.checked) etat.possede[pid] = 1; else delete etat.possede[pid];
       sauver(); render(); return;
     }
+    if (etat.editeur && etat.editeur.nouvelIng && el.hasAttribute && el.hasAttribute('data-ni')) {
+      etat.editeur.nouvelIng[el.getAttribute('data-ni')] = el.value;
+      if (el.getAttribute('data-ni') === 'u') render();
+      return;
+    }
+    if (el.id === 'fichierImport') {
+      if (el.files && el.files[0]) importerPerso(el.files[0]);
+      el.value = '';
+      return;
+    }
     if (el.id === 'tempsMax') { etat.reglages.tempsMax = parseInt(el.value, 10) || 0; sauver(); majBarreBasse(); return; }
     if (el.id === 'difficulteMax') { etat.reglages.difficulteMax = parseInt(el.value, 10) || 0; sauver(); majBarreBasse(); return; }
   });
 
   document.addEventListener('input', function (ev) {
     var el = ev.target;
-    if (el.id === 'envie') { etat.reglages.envie = el.value; sauver(); majBarreBasse(); return; }
+    if (el.id === 'envie') {
+      etat.reglages.envie = el.value;
+      var bloc = document.getElementById('blocIntensite');
+      if (bloc) bloc.hidden = !el.value.trim();
+      sauver(); majBarreBasse();
+      return;
+    }
     if (el.id === 'recherche') { etat.recherche = el.value; redessinerRecettes(); return; }
+    if (etat.editeur) {
+      var ed = etat.editeur;
+      if (el.id === 'edNom') { ed.n = el.value; sauverDiffere(); return; }
+      if (el.id === 'edCuisine') { ed.cu = el.value; sauverDiffere(); return; }
+      if (el.id === 'edTemps') { ed.t = parseInt(el.value, 10) || 0; sauverDiffere(); return; }
+      if (el.id === 'edTags') { ed.tags = el.value; sauverDiffere(); return; }
+      if (el.id === 'edEtapes') { ed.e = el.value; sauverDiffere(); return; }
+      if (el.id === 'edRechIng') { ed.rechIng = el.value; majEditeur(['resultats']); return; }
+      if (el.hasAttribute('data-ed-qte')) {
+        var k = parseInt(el.getAttribute('data-ed-qte'), 10);
+        ed.i[k][1] = parseFloat(el.value) || 0;
+        majEditeur(['analyse']);
+        majLigneParPersonne(k);
+        sauverDiffere();
+        return;
+      }
+      if (el.hasAttribute('data-ni') && ed.nouvelIng) {
+        ed.nouvelIng[el.getAttribute('data-ni')] = el.value;
+        return;
+      }
+    }
+    if (el.id === 'nomRaccourci') { etat.reglages.rappelsRaccourci = el.value; sauver(); return; }
     if (el.id === 'rechercheAversion') {
       var zone = document.getElementById('listeAversions');
       if (zone) zone.innerHTML = pucesAversions(el.value);
       return;
     }
   });
+
+  /* Met à jour la seule mention "par personne" de la ligne saisie. */
+  function majLigneParPersonne(k) {
+    var ed = etat.editeur;
+    var li = document.querySelectorAll('#edLignes li')[k];
+    if (!li || !ed.i[k]) return;
+    var ing = ING.byId[ed.i[k][0]];
+    var detail = li.querySelector('.detail');
+    if (!ing || !detail) return;
+    var parPers = Math.round((ed.i[k][1] / (ed.base || 1)) * 100) / 100;
+    var unite = ing.u === 'pc' ? S.plurielUnite(ing.up || 'pièce', parPers) : ing.u;
+    detail.textContent = S.nb(parPers) + ' ' + unite + ' par personne';
+  }
 
   /* Redessine la seule liste des recettes, pour ne pas perdre le focus. */
   var minuteur = null;

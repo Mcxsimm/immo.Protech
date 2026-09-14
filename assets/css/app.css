@@ -312,3 +312,14 @@ ul.ingredients .q { margin-left: auto; color: var(--texte-doux); font-variant-nu
   .carte { box-shadow: none; border-color: #ccc; break-inside: avoid; }
   .rayon h3 { position: static; }
 }
+
+/* ------------------------------------------------------- éditeur de recette */
+details > summary { list-style: revert; }
+details > summary::-webkit-details-marker { display: revert; }
+input.qte-ing { padding: 6px 8px; font-variant-numeric: tabular-nums; }
+ul.ingredients li input.qte-ing { flex: 0 0 auto; }
+ul.ingredients li .icone-bouton { flex: 0 0 auto; height: 30px; width: 30px; }
+/* L'aperçu suit le défilement de la saisie sur grand écran seulement. */
+@media (min-width: 900px) {
+  #edAnalyse { position: sticky; top: 118px; }
+}
