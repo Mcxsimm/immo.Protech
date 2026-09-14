@@ -323,3 +323,15 @@ ul.ingredients li .icone-bouton { flex: 0 0 auto; height: 30px; width: 30px; }
 @media (min-width: 900px) {
   #edAnalyse { position: sticky; top: 118px; }
 }
+
+/* ------------------------------------------- méthodes d'envoi vers Rappels */
+.methode {
+  border: 1px solid var(--bord); border-radius: var(--r-s);
+  padding: 14px; margin-top: 14px; background: var(--surface-2);
+}
+.methode h4 {
+  margin: 0 0 10px; font-size: .95rem;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.methode ol { line-height: 1.6; }
+.methode ol li + li { margin-top: 4px; }

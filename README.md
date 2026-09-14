@@ -73,20 +73,27 @@ peut réduire la variété), l'application le **dit** au lieu de le masquer.
 
 ### 5. La liste part dans Rappels (iPhone, iPad, Mac)
 
-Apple n'offre aucun format d'import direct pour Rappels. Semainier propose
-donc les deux seuls chemins réellement fiables :
+Apple n'expose aucun moyen d'écrire directement dans Rappels depuis une page
+web. Deux chemins existent, présentés dans cet ordre :
 
-- **Via Raccourcis** — un bouton ouvre l'app Raccourcis et lui passe la liste ;
-  un raccourci de quatre actions, à créer une fois (la marche à suivre est
-  dépliable dans l'application), découpe le texte ligne par ligne et crée un
-  rappel par article dans la liste de votre choix.
-- **Par copie** — un bouton copie la liste, une ligne par article ; collée
-  dans une liste Rappels, chaque ligne devient un rappel distinct.
+- **Copier-coller — rien à installer.** Un bouton copie la liste, une ligne
+  par article ; dans Rappels, ouvrez votre liste et collez : un rappel est
+  créé par ligne. Sur les appareils qui proposent la feuille de partage iOS,
+  un bouton *Partager* permet aussi d'envoyer la liste vers Notes, Messages ou
+  un raccourci.
+- **Envoi automatique — un raccourci à créer une fois.** Un bouton ouvre
+  l'app Raccourcis et lui passe la liste ; un raccourci de quatre actions
+  (*Diviser le texte* → *Répéter pour chaque élément* → *Ajouter un nouveau
+  rappel*) crée un rappel par article. Tant que ce raccourci n'existe pas,
+  iOS répond « Le fichier n'existe pas » : la marche à suivre reste donc
+  dépliée dans l'application jusqu'à ce que vous confirmiez l'avoir créé.
 
+Vous indiquez le **nom de votre liste Rappels** ; les instructions s'y
+réfèrent nommément, pour qu'il n'y ait rien à deviner à l'étape de création.
 Dans les deux cas les articles déjà cochés sont omis, et deux options
 permettent de préfixer chaque ligne par son rayon et d'inclure ou non les
 produits de placard. Le bouton Raccourcis copie aussi la liste au passage :
-sur un appareil sans l'app Raccourcis, rien n'est perdu.
+si l'app est absente ou le raccourci introuvable, rien n'est perdu.
 
 ### 6. Vos propres recettes
 

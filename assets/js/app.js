@@ -65,7 +65,8 @@
       regimes: [], allergenes: [], exclusions: [],
       tempsMax: 0, difficulteMax: 0, prefSaison: true, budgetSemaine: 0,
       favoriserPerso: true,
-      rappelsRaccourci: 'Courses Semainier', rappelsRayons: false, rappelsPlacard: false
+      rappelsRaccourci: 'Courses Semainier', rappelsListe: 'Liste de courses',
+      rappelsRaccourciPret: false, rappelsRayons: false, rappelsPlacard: false
     },
     plan: null,
     coches: {},
@@ -586,12 +587,21 @@
   }
 
   /* ---------------------------------------------- envoi vers l'app Rappels */
-  /* Apple ne propose pas d'import direct dans Rappels. Deux chemins fiables :
-     un raccourci qui découpe le texte ligne par ligne (le plus sûr, à créer
-     une fois), et la copie pour un collage manuel. */
+  /* Apple n'expose aucun moyen d'écrire directement dans Rappels depuis une
+     page web. Deux chemins existent, présentés dans cet ordre :
+       1. copier puis coller dans la liste — aucune installation ;
+       2. un raccourci qui découpe le texte ligne par ligne — à créer une
+          fois, ensuite c'est un seul geste.
+     Le second échoue tant que le raccourci n'existe pas, et iOS affiche
+     alors « Le fichier n'existe pas » : la marche à suivre reste donc
+     dépliée tant que l'utilisateur n'a pas confirmé l'avoir créé. */
   function carteRappels(l) {
     var r = etat.reglages;
     var lignes = S.lignesArticles(l, { rayons: r.rappelsRayons, placard: r.rappelsPlacard, coches: etat.coches });
+    var pret = !!r.rappelsRaccourciPret;
+    var liste = (r.rappelsListe || '').trim() || 'Courses';
+    var partageDispo = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
     return '<div class="carte carte-p no-print" style="margin-bottom:18px">' +
       '<h3>📱 Envoyer vers l’app Rappels</h3>' +
       '<p class="petit doux">' + lignes.length + ' article(s) à envoyer — les articles déjà cochés sont omis.</p>' +
@@ -601,26 +611,50 @@
       '<button type="button" class="puce" data-rappels-opt="placard" aria-pressed="' + !!r.rappelsPlacard + '">Inclure les produits de placard</button>' +
       '</div></div>' +
 
-      '<div class="actions">' +
-      '<button class="bouton principal" data-action="rappels-raccourci">⚡️ Envoyer via Raccourcis</button>' +
-      '<button class="bouton" data-action="rappels-copier">📋 Copier les ' + lignes.length + ' lignes</button>' +
+      '<label class="champ"><span class="lib">Nom de votre liste dans Rappels</span>' +
+      '<input type="text" id="nomListeRappels" value="' + esc(r.rappelsListe) + '" placeholder="Liste de courses" autocomplete="off"></label>' +
+
+      /* ------------------------- méthode sans installation --------------- */
+      '<div class="methode">' +
+      '<h4>Copier-coller <span class="tag vert">rien à installer</span></h4>' +
+      '<div class="actions" style="margin-bottom:10px">' +
+      '<button class="bouton principal" data-action="rappels-copier">📋 Copier les ' + lignes.length + ' lignes</button>' +
+      (partageDispo ? '<button class="bouton" data-action="rappels-partager">↗ Partager…</button>' : '') +
+      '</div>' +
+      '<ol class="petit" style="padding-left:20px;margin:0">' +
+      '<li>Touchez <b>Copier</b> ci-dessus.</li>' +
+      '<li>Ouvrez <b>Rappels</b> et votre liste <b>' + esc(liste) + '</b>.</li>' +
+      '<li>Touchez la zone vide sous le dernier rappel, puis <b>Coller</b> : Rappels crée un rappel par ligne.</li>' +
+      '</ol>' +
+      '<p class="petit doux" style="margin:8px 0 0">Si votre version de Rappels colle tout dans un seul rappel, passez par la méthode ci-dessous.</p>' +
       '</div>' +
 
-      '<details style="margin-top:14px">' +
-      '<summary class="petit" style="cursor:pointer"><b>Première utilisation : créer le raccourci (2 minutes)</b></summary>' +
+      /* --------------------------- méthode automatique ------------------- */
+      '<div class="methode">' +
+      '<h4>Envoi automatique ' +
+      (pret ? '<span class="tag vert">raccourci prêt</span>' : '<span class="tag orange">raccourci à créer, une fois</span>') + '</h4>' +
+      '<div class="actions" style="margin-bottom:10px">' +
+      '<button class="bouton' + (pret ? ' principal' : '') + '" data-action="rappels-raccourci">⚡️ Envoyer via Raccourcis</button>' +
+      '</div>' +
+
+      '<details' + (pret ? '' : ' open') + ' id="aideRaccourci">' +
+      '<summary class="petit" style="cursor:pointer"><b>Créer le raccourci (2 minutes, une seule fois)</b></summary>' +
       '<div class="petit" style="margin-top:10px">' +
+      '<p style="margin:0 0 8px">Sans cette étape, iOS répond <i>« Le fichier n’existe pas »</i> : il cherche un raccourci qui n’a pas encore été créé.</p>' +
       '<ol style="padding-left:20px;margin:0 0 12px">' +
-      '<li>Ouvrez l’app <b>Raccourcis</b> sur votre iPhone, puis <b>+</b> pour un nouveau raccourci.</li>' +
-      '<li>Ajoutez l’action <b>Diviser le texte</b> : entrée = <i>Entrée du raccourci</i>, séparateur = <b>Nouvelles lignes</b>.</li>' +
-      '<li>Ajoutez <b>Répéter pour chaque élément</b> sur le résultat de la division.</li>' +
-      '<li>À l’intérieur de la boucle, ajoutez <b>Ajouter un nouveau rappel</b> : titre = <i>Élément de répétition</i>, liste = <b>Courses</b>.</li>' +
-      '<li>Nommez le raccourci exactement comme ci-dessous, puis revenez ici.</li>' +
+      '<li>Ouvrez l’app <b>Raccourcis</b>, onglet <b>Bibliothèque</b>, puis <b>+</b> en haut à droite.</li>' +
+      '<li>Touchez <b>Ajouter une action</b>, cherchez <b>Diviser le texte</b> et ajoutez-la. Réglez <i>Séparateur</i> sur <b>Nouvelles lignes</b> ; laissez l’entrée sur <i>Entrée du raccourci</i>.</li>' +
+      '<li>Ajoutez <b>Répéter pour chaque élément</b> : elle prend automatiquement le résultat de la division.</li>' +
+      '<li><b>À l’intérieur</b> de la boucle, ajoutez <b>Ajouter un nouveau rappel</b>. Mettez <i>Élément de répétition</i> comme titre et choisissez la liste <b>' + esc(liste) + '</b>.</li>' +
+      '<li>Touchez le nom du raccourci en haut, puis <b>Renommer</b>, et saisissez exactement :</li>' +
       '</ol>' +
-      '<label class="champ" style="margin-bottom:8px"><span class="lib">Nom exact du raccourci</span>' +
+      '<label class="champ" style="margin-bottom:10px"><span class="lib">Nom exact du raccourci</span>' +
       '<input type="text" id="nomRaccourci" value="' + esc(r.rappelsRaccourci) + '" autocomplete="off"></label>' +
-      '<p class="doux" style="margin:0">Sans raccourci, utilisez <b>Copier</b> : dans Rappels, ouvrez une liste et collez — chaque ligne devient un rappel distinct. ' +
-      'Le bouton Raccourcis ne fonctionne que depuis un iPhone, un iPad ou un Mac.</p>' +
-      '</div></details></div>';
+      '<div class="actions">' +
+      '<button class="bouton mini" data-action="rappels-pret">' + (pret ? '↺ Je ne l’ai plus' : '✓ C’est fait, j’ai créé le raccourci') + '</button>' +
+      '</div>' +
+      '<p class="doux" style="margin:10px 0 0">Ce bouton n’a d’effet que sur un iPhone, un iPad ou un Mac : l’app Raccourcis n’existe pas ailleurs.</p>' +
+      '</div></details></div></div>';
   }
 
   /* --------------------------------------------------------------- modale */
@@ -1247,13 +1281,29 @@
       toast('Liste trop longue pour ce transfert : utilisez la copie.');
       return;
     }
-    /* Sur un appareil sans l'app Raccourcis, le lien ne mène nulle part :
-       on copie donc la liste en parallèle pour ne jamais laisser l'écran vide. */
+    /* Le lien peut échouer de deux façons : pas d'app Raccourcis, ou pas de
+       raccourci de ce nom. Dans les deux cas la liste est déjà dans le
+       presse-papiers, donc le collage manuel reste possible. */
     copierTexte(lignes.join('\n'), null);
     window.location.href = url;
     setTimeout(function () {
-      toast('Si Raccourcis ne s’est pas ouvert, la liste a été copiée : collez-la dans Rappels.');
-    }, 1500);
+      toast(etat.reglages.rappelsRaccourciPret
+        ? 'Liste envoyée. Elle est aussi copiée, au cas où.'
+        : 'Si Raccourcis répond « Le fichier n’existe pas », le raccourci reste à créer — la liste est copiée en attendant.');
+    }, 1600);
+  }
+
+  /* Feuille de partage iOS : permet d'envoyer la liste vers Notes, Messages
+     ou un raccourci, sans passer par le presse-papiers. */
+  function partagerListe() {
+    var lignes = lignesRappels();
+    if (!lignes.length) { toast('Aucun article à partager.'); return; }
+    if (navigator.share) {
+      navigator.share({ title: 'Liste de courses', text: lignes.join('\n') })
+        .catch(function () { /* partage annulé */ });
+    } else {
+      copierTexte(lignes.join('\n'), 'Partage indisponible : la liste a été copiée.');
+    }
   }
 
   /* ============================== ÉVÉNEMENTS ============================= */
@@ -1412,6 +1462,14 @@
     else if (action === 'perso-exporter') { exporterPerso(); }
     else if (action === 'perso-importer') { var f = document.getElementById('fichierImport'); if (f) f.click(); }
     else if (action === 'rappels-raccourci') { envoyerVersRaccourcis(); }
+    else if (action === 'rappels-partager') { partagerListe(); }
+    else if (action === 'rappels-pret') {
+      etat.reglages.rappelsRaccourciPret = !etat.reglages.rappelsRaccourciPret;
+      sauver(); render();
+      toast(etat.reglages.rappelsRaccourciPret
+        ? 'Parfait : un seul bouton suffira désormais.'
+        : 'La marche à suivre est réaffichée.');
+    }
     else if (action === 'rappels-copier') {
       var lr = lignesRappels();
       if (!lr.length) { toast('Aucun article à copier.'); return; }
@@ -1462,6 +1520,7 @@
       el.value = '';
       return;
     }
+    if (el.id === 'nomListeRappels') { etat.reglages.rappelsListe = el.value; sauver(); render(); return; }
     if (el.id === 'tempsMax') { etat.reglages.tempsMax = parseInt(el.value, 10) || 0; sauver(); majBarreBasse(); return; }
     if (el.id === 'difficulteMax') { etat.reglages.difficulteMax = parseInt(el.value, 10) || 0; sauver(); majBarreBasse(); return; }
   });
@@ -1497,7 +1556,8 @@
         return;
       }
     }
-    if (el.id === 'nomRaccourci') { etat.reglages.rappelsRaccourci = el.value; sauver(); return; }
+    if (el.id === 'nomRaccourci') { etat.reglages.rappelsRaccourci = el.value; sauverDiffere(); return; }
+    if (el.id === 'nomListeRappels') { etat.reglages.rappelsListe = el.value; sauverDiffere(); return; }
     if (el.id === 'rechercheAversion') {
       var zone = document.getElementById('listeAversions');
       if (zone) zone.innerHTML = pucesAversions(el.value);
