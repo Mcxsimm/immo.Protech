@@ -90,6 +90,14 @@
       var seuil = c === 'charcuterie' ? 40 : 1;
       if ((poids[c] || 0) >= seuil && poids[c] > max) { max = poids[c]; prot = c; }
     });
+    /* Une petite quantite de charcuterie ne fait pas un plat de viande, mais
+       elle ne doit pas pour autant rendre le plat vegetarien : sans cette
+       reprise, des gnocchis au chorizo comptaient comme repas sans viande. */
+    if (!prot) {
+      ANIMAL_PROT.forEach(function (c) {
+        if ((poids[c] || 0) > max) { max = poids[c]; prot = c; }
+      });
+    }
     if (!prot) {
       if ((poids.legumineuse || 0) >= 60) prot = 'legumineuse';
       else if ((poids.soja || 0) >= 60) prot = 'soja';

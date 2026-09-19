@@ -248,9 +248,13 @@
         .forEach(function (s) { score += s * 1.1; });
     }
 
-    /* 4 bis. Recettes maison : l'utilisateur les a saisies pour les cuisiner. */
-    if (o.favoriserPerso) {
-      score += recettes.filter(function (r) { return r.perso; }).length * 3.5;
+    /* 4 bis. Redites : un plat servi la semaine dernière coûte cher, un plat
+       vu il y a trois semaines à peine. */
+    if (o.historique.length) {
+      recettes.forEach(function (r) {
+        var k = o.historique.indexOf(r.id);
+        if (k >= 0) score -= k < o.nbRepas ? 16 : (k < o.nbRepas * 2 ? 8 : 3);
+      });
     }
 
     /* 5. Anti-gaspi : reutiliser un produit frais evite une botte de persil
@@ -298,7 +302,13 @@
       verrous: opts.verrous || [],
       exclusRecettes: opts.exclusRecettes || [],
       interdits: opts.interdits || [],
-      favoriserPerso: opts.favoriserPerso !== false,
+      /* Bases dans lesquelles piocher : 'nous', 'idees', ou les deux. */
+      sources: (opts.sources && opts.sources.length) ? opts.sources.slice() : ['nous', 'idees'],
+      /* Plats choisis à la main : ils entrent dans la semaine quoi qu'il arrive. */
+      imposes: (opts.imposes || []).slice(),
+      /* Recettes des semaines précédentes, de la plus récente à la plus ancienne :
+         les revoir trop vite est le principal reproche fait à un menu tiré. */
+      historique: (opts.historique || []).slice(),
       seed: opts.seed || Math.floor(Math.random() * 1e9)
     };
     o.envieMots = etendreEnvie(normalise(o.envie).split(' ').filter(function (m) { return m.length >= 3; }));
@@ -312,10 +322,25 @@
     var obj = objectifs(o.nbRepas, o);
 
     /* Catalogue eligible. */
+    function dansLesSources(r) { return o.sources.indexOf(r.src || 'idees') >= 0; }
+
     var pool = global.MP_RECIPES.filter(function (r) {
-      return o.interdits.indexOf(r.id) < 0 && eligible(r, o);
+      return o.interdits.indexOf(r.id) < 0 && dansLesSources(r) && eligible(r, o);
     });
     var raisonEchec = null;
+
+    /* Une base trop étroite pour le nombre de repas : on élargit aux deux
+       plutôt que de rendre une semaine incomplète, et on le dit. */
+    if (pool.length < o.nbRepas && o.sources.length === 1) {
+      var elargi = global.MP_RECIPES.filter(function (r) {
+        return o.interdits.indexOf(r.id) < 0 && eligible(r, o);
+      });
+      if (elargi.length > pool.length) {
+        raisonEchec = 'Seulement ' + pool.length + ' recette(s) dans la base choisie : les deux bases ont été utilisées.';
+        o.sources = ['nous', 'idees'];
+        pool = elargi;
+      }
+    }
     if (pool.length < o.nbRepas) {
       raisonEchec = pool.length === 0
         ? 'Aucune recette ne correspond à ces contraintes.'
@@ -323,12 +348,12 @@
       /* Repli : on relache le temps puis la difficulte plutot que d'echouer. */
       var relache = Object.assign({}, o, { tempsMax: 0, difficulteMax: 0 });
       pool = global.MP_RECIPES.filter(function (r) {
-        return o.interdits.indexOf(r.id) < 0 && eligible(r, relache);
+        return o.interdits.indexOf(r.id) < 0 && dansLesSources(r) && eligible(r, relache);
       });
       if (pool.length < o.nbRepas) {
         relache.exclusions = [];
         pool = global.MP_RECIPES.filter(function (r) {
-          return o.interdits.indexOf(r.id) < 0 && eligible(r, relache);
+          return o.interdits.indexOf(r.id) < 0 && dansLesSources(r) && eligible(r, relache);
         });
       }
     }
@@ -341,7 +366,10 @@
     pool.forEach(function (r) {
       var w = 1;
       w += Math.min(scoreEnvie(r, o.envieMots), 12) * 1.2;
-      if (r.perso && o.favoriserPerso) w *= 6;
+      /* Vu très récemment : on l'écarte sans l'interdire, pour que deux
+         tirages successifs ne se ressemblent pas. */
+      var vuIl = o.historique.indexOf(r.id);
+      if (vuIl >= 0) w *= vuIl < o.nbRepas ? 0.12 : (vuIl < o.nbRepas * 2 ? 0.3 : 0.6);
       if (o.prefSaison) {
         if (!r.s) w += 0.4;
         else if (r.s.indexOf(o.saison) >= 0) w += 1.6;
@@ -383,6 +411,23 @@
     o.verrous.forEach(function (v) {
       var r = global.MP_RECIPES.find(function (x) { return x.id === v.id; });
       if (r && v.index < o.nbRepas) fixes[v.index] = r;
+    });
+
+    /* Plats choisis explicitement : ils prennent les premières places libres.
+       Un choix délibéré prime sur les filtres — on le signale plutôt que de
+       l'écarter en silence. */
+    var imposesPoses = [], imposesEnTrop = [], imposesEnConflit = [];
+    o.imposes.forEach(function (id) {
+      var r = global.MP_RECIPES.find(function (x) { return x.id === id; });
+      if (!r) return;
+      var dejaFixe = Object.keys(fixes).some(function (k) { return fixes[k].id === id; });
+      if (dejaFixe) return;
+      var place = -1;
+      for (var i = 0; i < o.nbRepas; i++) { if (!fixes[i]) { place = i; break; } }
+      if (place < 0) { imposesEnTrop.push(r.n); return; }
+      fixes[place] = r;
+      imposesPoses.push(r);
+      if (!eligible(r, o)) imposesEnConflit.push(r.n);
     });
 
     function construire() {
@@ -447,6 +492,17 @@
         verrouille: !!fixes[i]
       };
     });
+
+    if (imposesEnTrop.length) {
+      raisonEchec = (raisonEchec ? raisonEchec + ' ' : '') +
+        'Plus de plats choisis que de repas : ' + imposesEnTrop.join(', ') + ' n’a pas pu être placé.';
+    }
+    if (imposesEnConflit.length) {
+      meilleurNote.alertes = (meilleurNote.alertes || []).concat([{
+        t: 'choix_conflit',
+        m: 'Plat choisi malgré vos contraintes : ' + imposesEnConflit.join(', ') + '.'
+      }]);
+    }
 
     return {
       ok: true,

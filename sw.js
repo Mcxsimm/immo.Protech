@@ -1,10 +1,11 @@
 /* Service worker minimal : l'application fonctionne hors connexion une fois
    consultee. Le cache est versionne, les anciennes versions sont purgees. */
-var CACHE = 'semainier-v2';
+var CACHE = 'semainier-v3';
 var FICHIERS = [
   './', './index.html', './manifest.webmanifest',
   './assets/css/app.css',
   './assets/data/ingredients.js', './assets/data/recipes.js',
+  './assets/data/recipes-maison.js',
   './assets/js/nutrition.js', './assets/js/planner.js',
   './assets/js/shopping.js', './assets/js/store.js', './assets/js/custom.js',
   './assets/js/app.js'

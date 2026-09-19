@@ -96,7 +96,8 @@
     });
 
     donnees.recettes.forEach(function (r) {
-      var copie = Object.assign({}, r, { perso: true });
+      /* Ce que l'utilisateur saisit rejoint la base « nos recettes ». */
+      var copie = Object.assign({}, r, { perso: true, src: 'nous' });
       delete copie._profile;           /* le profil est recalculé à la demande */
       RECETTES.push(copie);
     });
@@ -148,6 +149,7 @@
       i: r.i.map(function (l) { return [l[0], Math.round(l[1] * 1000) / 1000]; }),
       e: r.e.map(function (e) { return e.trim(); }).filter(Boolean),
       perso: true,
+      src: 'nous',
       maj: Date.now()
     };
     if (r.s && r.s.length && r.s.length < 4) propre.s = r.s.slice();

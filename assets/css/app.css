@@ -128,9 +128,11 @@ nav.onglets button[aria-selected="false"] .pastille-nb { background: var(--surfa
 .titre-section h2 { margin: 0; }
 
 /* -------------------------------------------------------------- contrôles */
-label.champ { display: block; margin-bottom: 16px; }
-label.champ > span.lib { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 6px; }
-label.champ > span.aide { display: block; font-size: .8rem; color: var(--texte-doux); margin-bottom: 7px; }
+/* Un bloc de réglage est un <label> quand il pilote un champ, un <div>
+   quand il ne contient que des boutons : la mise en forme vaut pour les deux. */
+label.champ, div.champ { display: block; margin-bottom: 16px; }
+.champ > span.lib { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 6px; }
+.champ > span.aide { display: block; font-size: .8rem; color: var(--texte-doux); margin-bottom: 7px; }
 
 input[type="text"], input[type="number"], select, textarea {
   width: 100%; padding: 10px 12px; font: inherit; color: var(--texte);
@@ -335,3 +337,18 @@ ul.ingredients li .icone-bouton { flex: 0 0 auto; height: 30px; width: 30px; }
 }
 .methode ol { line-height: 1.6; }
 .methode ol li + li { margin-top: 4px; }
+
+/* --------------------------------- fiches recettes à deux actions -------- */
+.fiche { display: flex; align-items: stretch; padding: 0; overflow: hidden; }
+.fiche-ouvrir {
+  flex: 1; min-width: 0; padding: 14px; border: 0; background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer;
+}
+.fiche-choix {
+  flex: 0 0 auto; width: 48px; border: 0; border-left: 1px solid var(--bord);
+  background: var(--surface-2); color: var(--texte-doux);
+  font-size: 17px; line-height: 1; cursor: pointer;
+}
+.fiche-choix:hover { background: var(--vert-clair); color: var(--vert-fonce); }
+.fiche-choix[aria-pressed="true"] { background: var(--vert); color: #fff; }
+.fiche-choisie { border-color: var(--vert); box-shadow: 0 0 0 1px var(--vert) inset, var(--ombre); }

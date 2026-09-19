@@ -2,6 +2,7 @@
 global.window = global;
 require('../assets/data/ingredients.js');
 require('../assets/data/recipes.js');
+require('../assets/data/recipes-maison.js');
 require('../assets/js/nutrition.js');
 
 var ING = global.MP_INGREDIENTS, R = global.MP_RECIPES, N = global.MP_NUTRITION;
@@ -41,7 +42,9 @@ R.forEach(function (r) {
   Object.keys(regimes).forEach(function (k) { if (p.regimes[k]) regimes[k]++; });
 });
 
-console.log('Recettes          :', R.length);
+var parSource = {};
+R.forEach(function (r) { parSource[r.src || 'idees'] = (parSource[r.src || 'idees'] || 0) + 1; });
+console.log('Recettes          :', R.length, parSource);
 console.log('Ingrédients       :', ING.list.length, '(' + inutilises.length + ' non utilisés)');
 console.log('Par famille       :', parFamille);
 console.log('Par base féculente:', parBase);
