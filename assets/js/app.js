@@ -64,15 +64,20 @@
       nbRepas: 5, convives: 4, envie: '', envieIntensite: 'un_peu',
       regimes: [], allergenes: [], exclusions: [],
       tempsMax: 0, difficulteMax: 0, prefSaison: true, budgetSemaine: 0,
-      favoriserPerso: true,
-      rappelsRaccourci: 'Courses Semainier', rappelsRayons: false, rappelsPlacard: false
+      sources: ['nous', 'idees'],
+      rappelsRaccourci: 'Courses Semainier', rappelsListe: 'Liste de courses',
+      rappelsRaccourciPret: false, rappelsRayons: false, rappelsPlacard: false
     },
     plan: null,
     coches: {},
     possede: {},
     recherche: '',
     filtreFamille: '',
-    filtrePerso: false,
+    filtreSource: '',
+    /* Plats choisis à la main pour la prochaine semaine. */
+    choix: [],
+    /* Recettes des dernières semaines, pour ne pas les resservir aussitôt. */
+    historique: [],
     editeur: null,
     theme: 'auto'
   };
@@ -84,6 +89,14 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function eur(x) { return (Math.round(x * 100) / 100).toFixed(2).replace('.', ',') + ' €'; }
+
+  /** Vrai si chaque mot de la recherche se trouve quelque part dans le texte. */
+  function tousLesMots(recherche, texte) {
+    var mots = P.normalise(recherche).split(' ').filter(Boolean);
+    if (!mots.length) return true;
+    var cible = P.normalise(texte);
+    return mots.every(function (m) { return cible.indexOf(m) >= 0; });
+  }
   function $(sel) { return document.querySelector(sel); }
 
   function toast(message) {
@@ -102,6 +115,8 @@
       possede: etat.possede,
       theme: etat.theme,
       onglet: etat.onglet,
+      choix: etat.choix,
+      historique: etat.historique,
       editeur: etat.editeur,
       plan: etat.plan ? {
         repas: etat.plan.repas.map(function (r) {
@@ -131,6 +146,8 @@
     etat.coches = d.coches || {};
     etat.possede = d.possede || {};
     etat.theme = d.theme || 'auto';
+    etat.choix = Array.isArray(d.choix) ? d.choix : [];
+    etat.historique = Array.isArray(d.historique) ? d.historique : [];
     if (d.onglet) etat.onglet = d.onglet;
     /* Un formulaire laissé en cours de saisie est retrouvé tel quel. */
     if (d.editeur && d.editeur.i) etat.editeur = d.editeur;
@@ -322,14 +339,10 @@
       '<button type="button" class="puce" data-saison="0" aria-pressed="' + (r.prefSaison === false) + '">Peu importe</button>' +
       '</div></div>' +
 
-      (C.recettes().length ? '<div class="champ" style="margin-bottom:0;margin-top:16px">' +
-        '<span class="lib">Mes ' + C.recettes().length + ' recette(s) personnelle(s)</span>' +
-        '<span class="aide">Sans coup de pouce, quelques recettes maison se noieraient parmi les ' + RECETTES.length + ' du catalogue.</span>' +
-        '<div class="puces">' +
-        '<button type="button" class="puce" data-fav-perso="1" aria-pressed="' + (r.favoriserPerso !== false) + '">Les proposer souvent</button>' +
-        '<button type="button" class="puce" data-fav-perso="0" aria-pressed="' + (r.favoriserPerso === false) + '">Comme les autres</button>' +
-        '</div></div>' : '') +
       '</div></div>' +
+
+      carteSources() +
+      carteChoix() +
 
       (manque ? '<div class="alerte-bloc" style="margin-bottom:18px"><span>⚠️</span><div>' +
         'Seulement <b>' + dispo + '</b> recette(s) correspondent à ces contraintes, pour ' + r.nbRepas + ' repas demandés. ' +
@@ -338,6 +351,71 @@
       '<div class="section centre"><button class="bouton principal grand" data-action="generer">' +
       (etat.plan ? '↻ Générer une nouvelle semaine' : 'Générer ma semaine') + '</button>' +
       '<p class="petit doux" style="margin-top:10px">' + dispo + ' recettes compatibles sur ' + RECETTES.length + '.</p></div>';
+  }
+
+  /* ------------------------------ bases de recettes -------------------- */
+  /* Deux répertoires cohabitent : les plats du foyer et le catalogue
+     d'idées. On pioche dans l'un, dans l'autre, ou dans les deux. */
+  function carteSources() {
+    var r = etat.reglages;
+    var compte = { nous: 0, idees: 0 };
+    RECETTES.forEach(function (x) { compte[x.src === 'nous' ? 'nous' : 'idees']++; });
+    var actif = function (liste) {
+      return r.sources.length === liste.length &&
+        liste.every(function (s) { return r.sources.indexOf(s) >= 0; });
+    };
+    var dispo = function (liste) {
+      var o = Object.assign({}, r, { sources: liste });
+      return RECETTES.filter(function (x) {
+        return liste.indexOf(x.src === 'nous' ? 'nous' : 'idees') >= 0 && P.eligible(x, o);
+      }).length;
+    };
+
+    return '<div class="section"><div class="carte carte-p">' +
+      '<h2>Dans quelle base piocher&nbsp;?</h2>' +
+      '<p class="doux petit">Vos plats habituels d’un côté, les suggestions du catalogue de l’autre.</p>' +
+      '<div class="puces" style="margin-top:12px">' +
+      '<button type="button" class="puce" data-source="nous" aria-pressed="' + actif(['nous']) + '">' +
+      '★ Nos recettes <span class="doux">(' + compte.nous + ')</span></button>' +
+      '<button type="button" class="puce" data-source="idees" aria-pressed="' + actif(['idees']) + '">' +
+      '💡 Idées <span class="doux">(' + compte.idees + ')</span></button>' +
+      '<button type="button" class="puce" data-source="tout" aria-pressed="' + actif(['nous', 'idees']) + '">' +
+      'Les deux</button>' +
+      '</div>' +
+      '<p class="petit doux" style="margin:12px 0 0">' +
+      dispo(r.sources) + ' recette(s) compatibles avec vos contraintes dans cette sélection.' +
+      (actif(['nous']) && compte.nous < 25
+        ? ' Une base restreinte revient forcément plus souvent sur les mêmes plats.' : '') +
+      '</p></div></div>';
+  }
+
+  /* -------------------------- plats choisis à la main ------------------- */
+  function carteChoix() {
+    var choisis = etat.choix
+      .map(function (id) { return RECETTES.filter(function (x) { return x.id === id; })[0]; })
+      .filter(Boolean);
+
+    return '<div class="section"><div class="carte carte-p">' +
+      '<h2>Plats imposés <span class="doux petit">' + choisis.length + ' / ' + etat.reglages.nbRepas + '</span></h2>' +
+      '<p class="doux petit">Ces plats entrent dans la semaine quoi qu’il arrive ; le reste est complété autour d’eux.</p>' +
+      (choisis.length
+        ? '<div style="margin-top:12px">' + choisis.map(function (x) {
+          var pr = N.profile(x);
+          return '<div class="repere"><span class="pastille-etat"></span>' +
+            '<span class="libelle">' + (x.src === 'nous' ? '★ ' : '') + esc(x.n) +
+            '<span class="detail petit doux" style="display:block">' + esc(N.LABEL_PROT[pr.proteine]) +
+            ' · ' + x.t + ' min</span></span>' +
+            '<button class="icone-bouton" data-choix-retirer="' + esc(x.id) + '" aria-label="Retirer ' + esc(x.n) + '">✕</button>' +
+            '</div>';
+        }).join('') + '</div>' +
+        (choisis.length > etat.reglages.nbRepas
+          ? '<div class="alerte-bloc" style="margin-top:12px"><span>⚠️</span><div>Vous avez choisi plus de plats que de repas : les derniers ne seront pas placés.</div></div>'
+          : '')
+        : '<p class="petit doux" style="margin:12px 0 0">Aucun plat imposé : toute la semaine sera composée automatiquement.</p>') +
+      '<div class="actions" style="margin-top:12px">' +
+      '<button class="bouton" data-onglet="recettes">＋ Choisir des plats</button>' +
+      (choisis.length ? '<button class="bouton mini" data-action="choix-vider">↺ Tout retirer</button>' : '') +
+      '</div></div></div>';
   }
 
   function compteur(cle, val, min, max, unite) {
@@ -374,8 +452,11 @@
       return '<article class="carte repas-carte' + (r.verrouille ? ' verrouille' : '') + '">' +
         '<div class="repas-jour"><b>' + (r.index + 1) + '</b><span>' + esc((JOURS[r.index] || '').slice(0, 3)) + '</span></div>' +
         '<div class="repas-corps">' +
-        '<h3><button data-recette="' + esc(r.id) + '">' + esc(r.recette.n) + '</button></h3>' +
+        '<h3><button data-recette="' + esc(r.id) + '">' +
+        (r.recette.src === 'nous' ? '★ ' : '') + esc(r.recette.n) + '</button></h3>' +
         '<div class="tags" style="margin-bottom:8px">' +
+        '<span class="tag' + (r.recette.src === 'nous' ? ' vert' : '') + '">' +
+        (r.recette.src === 'nous' ? 'Nos recettes' : 'Idée') + '</span>' +
         '<span class="tag vert">' + esc(N.LABEL_PROT[p.proteine]) + '</span>' +
         (p.feculent ? '<span class="tag">' + esc(p.feculentBase) + '</span>' : '') +
         '<span class="tag">' + esc(r.recette.cu) + '</span>' +
@@ -535,63 +616,94 @@
   /* ------------------------------------------------------ onglet Recettes */
   function vueRecettes() {
     var q = P.normalise(etat.recherche);
-    var perso = C.recettes();
     var familles = [['', 'Toutes'], ['viande_blanche', 'Viande blanche'], ['viande_rouge', 'Viande rouge'],
     ['poisson', 'Poisson & fruits de mer'], ['vegetarien', 'Végétarien']];
+    var sources = [['', 'Les deux'], ['nous', '★ Nos recettes'], ['idees', '💡 Idées']];
+    var compte = { nous: 0, idees: 0 };
+    RECETTES.forEach(function (x) { compte[x.src === 'nous' ? 'nous' : 'idees']++; });
 
     var liste = RECETTES.filter(function (r) {
-      if (etat.filtrePerso && !r.perso) return false;
+      var src = r.src === 'nous' ? 'nous' : 'idees';
+      if (etat.filtreSource && src !== etat.filtreSource) return false;
       var p = N.profile(r);
       if (etat.filtreFamille && N.familleProt(p.proteine) !== etat.filtreFamille) return false;
       if (!q) return true;
-      return P.normalise(r.n + ' ' + r.cu + ' ' + (r.tags || []).join(' ')).indexOf(q) >= 0 ||
-        Object.keys(p.ids).some(function (id) {
-          return ING.byId[id] && P.normalise(ING.byId[id].n).indexOf(q) >= 0;
-        });
+      var ingredients = Object.keys(p.ids).map(function (id) {
+        return ING.byId[id] ? ING.byId[id].n : '';
+      }).join(' ');
+      return tousLesMots(etat.recherche, r.n + ' ' + r.cu + ' ' + (r.tags || []).join(' ') + ' ' + ingredients);
     });
 
     return '<div class="section">' +
-      '<div class="titre-section"><h2>Les ' + RECETTES.length + ' recettes</h2>' +
-      '<span class="petit doux">' + liste.length + ' affichée(s)' +
-      (perso.length ? ' · ' + perso.length + ' à vous' : '') + '</span></div>' +
+      '<div class="titre-section"><h2>Les recettes</h2>' +
+      '<span class="petit doux">' + liste.length + ' affichée(s) sur ' + RECETTES.length +
+      ' · ' + compte.nous + ' à nous, ' + compte.idees + ' idées</span></div>' +
+
+      (etat.choix.length
+        ? '<div class="alerte-bloc info" style="margin-bottom:14px"><span>📌</span><div>' +
+        '<b>' + etat.choix.length + '</b> plat(s) imposé(s) pour la prochaine semaine. ' +
+        '<button class="bouton mini" data-onglet="planifier">Voir mes choix</button></div></div>'
+        : '') +
 
       '<div class="actions" style="margin-bottom:14px">' +
       '<button class="bouton principal" data-action="ed-nouvelle">➕ Créer une recette</button>' +
       '<button class="bouton mini" data-action="perso-importer">⬆️ Importer</button>' +
-      (perso.length ? '<button class="bouton mini" data-action="perso-exporter">⬇️ Exporter mes recettes</button>' : '') +
+      (C.recettes().length ? '<button class="bouton mini" data-action="perso-exporter">⬇️ Exporter mes recettes</button>' : '') +
       '</div>' +
       '<input type="file" id="fichierImport" accept="application/json,.json" hidden>' +
 
       '<input type="text" id="recherche" value="' + esc(etat.recherche) + '" placeholder="Rechercher un plat, un ingrédient, une cuisine…" autocomplete="off">' +
-      '<div class="puces" style="margin:12px 0 18px">' +
+      '<div class="puces" style="margin:12px 0 8px">' +
+      sources.map(function (s) {
+        return '<button type="button" class="puce" data-filtre-source="' + s[0] + '" aria-pressed="' + (etat.filtreSource === s[0]) + '">' + esc(s[1]) + '</button>';
+      }).join('') + '</div>' +
+      '<div class="puces" style="margin:0 0 18px">' +
       familles.map(function (f) {
-        return '<button type="button" class="puce" data-famille="' + f[0] + '" aria-pressed="' + (etat.filtreFamille === f[0] && !etat.filtrePerso) + '">' + esc(f[1]) + '</button>';
-      }).join('') +
-      (perso.length ? '<button type="button" class="puce" data-perso-filtre="1" aria-pressed="' + etat.filtrePerso + '">★ Mes recettes</button>' : '') +
-      '</div>' +
-      (liste.length ? '<div class="liste-recettes">' + liste.map(function (r) {
-        var p = N.profile(r);
-        return '<button class="carte fiche" data-recette="' + esc(r.id) + '">' +
-          '<h3>' + (r.perso ? '★ ' : '') + esc(r.n) + '</h3>' +
-          '<div class="tags"><span class="tag vert">' + esc(N.LABEL_PROT[p.proteine]) + '</span>' +
-          '<span class="tag">' + esc(r.cu) + '</span>' +
-          '<span class="tag">⏱ ' + r.t + ' min</span>' +
-          '<span class="tag">' + p.nutrition.kcal + ' kcal</span>' +
-          (r.perso && C.incomplete(r) ? '<span class="tag orange">analyse incomplète</span>' : '') + '</div>' +
-          '</button>';
-      }).join('') + '</div>'
+        return '<button type="button" class="puce" data-famille="' + f[0] + '" aria-pressed="' + (etat.filtreFamille === f[0]) + '">' + esc(f[1]) + '</button>';
+      }).join('') + '</div>' +
+
+      (liste.length ? '<div class="liste-recettes">' + liste.map(ficheRecette).join('') + '</div>'
         : '<div class="vide"><span class="emoji">🔍</span><p>Aucune recette ne correspond à cette recherche.</p>' +
         '<button class="bouton principal" data-action="ed-nouvelle">➕ Créer cette recette</button></div>') +
       '</div>';
   }
 
+  /* Une fiche porte deux actions distinctes : l'ouvrir, ou l'imposer dans la
+     semaine. D'où deux boutons côte à côte plutôt qu'un bouton imbriqué. */
+  function ficheRecette(r) {
+    var p = N.profile(r);
+    var choisi = etat.choix.indexOf(r.id) >= 0;
+    return '<div class="carte fiche' + (choisi ? ' fiche-choisie' : '') + '">' +
+      '<button class="fiche-ouvrir" data-recette="' + esc(r.id) + '">' +
+      '<h3>' + (r.src === 'nous' ? '★ ' : '') + esc(r.n) + '</h3>' +
+      '<div class="tags"><span class="tag vert">' + esc(N.LABEL_PROT[p.proteine]) + '</span>' +
+      '<span class="tag">' + esc(r.cu) + '</span>' +
+      '<span class="tag">⏱ ' + r.t + ' min</span>' +
+      '<span class="tag">' + p.nutrition.kcal + ' kcal</span>' +
+      (r.perso && C.incomplete(r) ? '<span class="tag orange">analyse incomplète</span>' : '') + '</div>' +
+      '</button>' +
+      '<button class="fiche-choix" data-choix="' + esc(r.id) + '" aria-pressed="' + choisi + '" ' +
+      'title="' + (choisi ? 'Retirer de la semaine' : 'Imposer ce plat dans la semaine') + '">' +
+      (choisi ? '📌' : '＋') + '</button>' +
+      '</div>';
+  }
+
   /* ---------------------------------------------- envoi vers l'app Rappels */
-  /* Apple ne propose pas d'import direct dans Rappels. Deux chemins fiables :
-     un raccourci qui découpe le texte ligne par ligne (le plus sûr, à créer
-     une fois), et la copie pour un collage manuel. */
+  /* Apple n'expose aucun moyen d'écrire directement dans Rappels depuis une
+     page web. Deux chemins existent, présentés dans cet ordre :
+       1. copier puis coller dans la liste — aucune installation ;
+       2. un raccourci qui découpe le texte ligne par ligne — à créer une
+          fois, ensuite c'est un seul geste.
+     Le second échoue tant que le raccourci n'existe pas, et iOS affiche
+     alors « Le fichier n'existe pas » : la marche à suivre reste donc
+     dépliée tant que l'utilisateur n'a pas confirmé l'avoir créé. */
   function carteRappels(l) {
     var r = etat.reglages;
     var lignes = S.lignesArticles(l, { rayons: r.rappelsRayons, placard: r.rappelsPlacard, coches: etat.coches });
+    var pret = !!r.rappelsRaccourciPret;
+    var liste = (r.rappelsListe || '').trim() || 'Courses';
+    var partageDispo = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
     return '<div class="carte carte-p no-print" style="margin-bottom:18px">' +
       '<h3>📱 Envoyer vers l’app Rappels</h3>' +
       '<p class="petit doux">' + lignes.length + ' article(s) à envoyer — les articles déjà cochés sont omis.</p>' +
@@ -601,26 +713,50 @@
       '<button type="button" class="puce" data-rappels-opt="placard" aria-pressed="' + !!r.rappelsPlacard + '">Inclure les produits de placard</button>' +
       '</div></div>' +
 
-      '<div class="actions">' +
-      '<button class="bouton principal" data-action="rappels-raccourci">⚡️ Envoyer via Raccourcis</button>' +
-      '<button class="bouton" data-action="rappels-copier">📋 Copier les ' + lignes.length + ' lignes</button>' +
+      '<label class="champ"><span class="lib">Nom de votre liste dans Rappels</span>' +
+      '<input type="text" id="nomListeRappels" value="' + esc(r.rappelsListe) + '" placeholder="Liste de courses" autocomplete="off"></label>' +
+
+      /* ------------------------- méthode sans installation --------------- */
+      '<div class="methode">' +
+      '<h4>Copier-coller <span class="tag vert">rien à installer</span></h4>' +
+      '<div class="actions" style="margin-bottom:10px">' +
+      '<button class="bouton principal" data-action="rappels-copier">📋 Copier les ' + lignes.length + ' lignes</button>' +
+      (partageDispo ? '<button class="bouton" data-action="rappels-partager">↗ Partager…</button>' : '') +
+      '</div>' +
+      '<ol class="petit" style="padding-left:20px;margin:0">' +
+      '<li>Touchez <b>Copier</b> ci-dessus.</li>' +
+      '<li>Ouvrez <b>Rappels</b> et votre liste <b>' + esc(liste) + '</b>.</li>' +
+      '<li>Touchez la zone vide sous le dernier rappel, puis <b>Coller</b> : Rappels crée un rappel par ligne.</li>' +
+      '</ol>' +
+      '<p class="petit doux" style="margin:8px 0 0">Si votre version de Rappels colle tout dans un seul rappel, passez par la méthode ci-dessous.</p>' +
       '</div>' +
 
-      '<details style="margin-top:14px">' +
-      '<summary class="petit" style="cursor:pointer"><b>Première utilisation : créer le raccourci (2 minutes)</b></summary>' +
+      /* --------------------------- méthode automatique ------------------- */
+      '<div class="methode">' +
+      '<h4>Envoi automatique ' +
+      (pret ? '<span class="tag vert">raccourci prêt</span>' : '<span class="tag orange">raccourci à créer, une fois</span>') + '</h4>' +
+      '<div class="actions" style="margin-bottom:10px">' +
+      '<button class="bouton' + (pret ? ' principal' : '') + '" data-action="rappels-raccourci">⚡️ Envoyer via Raccourcis</button>' +
+      '</div>' +
+
+      '<details' + (pret ? '' : ' open') + ' id="aideRaccourci">' +
+      '<summary class="petit" style="cursor:pointer"><b>Créer le raccourci (2 minutes, une seule fois)</b></summary>' +
       '<div class="petit" style="margin-top:10px">' +
+      '<p style="margin:0 0 8px">Sans cette étape, iOS répond <i>« Le fichier n’existe pas »</i> : il cherche un raccourci qui n’a pas encore été créé.</p>' +
       '<ol style="padding-left:20px;margin:0 0 12px">' +
-      '<li>Ouvrez l’app <b>Raccourcis</b> sur votre iPhone, puis <b>+</b> pour un nouveau raccourci.</li>' +
-      '<li>Ajoutez l’action <b>Diviser le texte</b> : entrée = <i>Entrée du raccourci</i>, séparateur = <b>Nouvelles lignes</b>.</li>' +
-      '<li>Ajoutez <b>Répéter pour chaque élément</b> sur le résultat de la division.</li>' +
-      '<li>À l’intérieur de la boucle, ajoutez <b>Ajouter un nouveau rappel</b> : titre = <i>Élément de répétition</i>, liste = <b>Courses</b>.</li>' +
-      '<li>Nommez le raccourci exactement comme ci-dessous, puis revenez ici.</li>' +
+      '<li>Ouvrez l’app <b>Raccourcis</b>, onglet <b>Bibliothèque</b>, puis <b>+</b> en haut à droite.</li>' +
+      '<li>Touchez <b>Ajouter une action</b>, cherchez <b>Diviser le texte</b> et ajoutez-la. Réglez <i>Séparateur</i> sur <b>Nouvelles lignes</b> ; laissez l’entrée sur <i>Entrée du raccourci</i>.</li>' +
+      '<li>Ajoutez <b>Répéter pour chaque élément</b> : elle prend automatiquement le résultat de la division.</li>' +
+      '<li><b>À l’intérieur</b> de la boucle, ajoutez <b>Ajouter un nouveau rappel</b>. Mettez <i>Élément de répétition</i> comme titre et choisissez la liste <b>' + esc(liste) + '</b>.</li>' +
+      '<li>Touchez le nom du raccourci en haut, puis <b>Renommer</b>, et saisissez exactement :</li>' +
       '</ol>' +
-      '<label class="champ" style="margin-bottom:8px"><span class="lib">Nom exact du raccourci</span>' +
+      '<label class="champ" style="margin-bottom:10px"><span class="lib">Nom exact du raccourci</span>' +
       '<input type="text" id="nomRaccourci" value="' + esc(r.rappelsRaccourci) + '" autocomplete="off"></label>' +
-      '<p class="doux" style="margin:0">Sans raccourci, utilisez <b>Copier</b> : dans Rappels, ouvrez une liste et collez — chaque ligne devient un rappel distinct. ' +
-      'Le bouton Raccourcis ne fonctionne que depuis un iPhone, un iPad ou un Mac.</p>' +
-      '</div></details></div>';
+      '<div class="actions">' +
+      '<button class="bouton mini" data-action="rappels-pret">' + (pret ? '↺ Je ne l’ai plus' : '✓ C’est fait, j’ai créé le raccourci') + '</button>' +
+      '</div>' +
+      '<p class="doux" style="margin:10px 0 0">Ce bouton n’a d’effet que sur un iPhone, un iPad ou un Mac : l’app Raccourcis n’existe pas ailleurs.</p>' +
+      '</div></details></div></div>';
   }
 
   /* --------------------------------------------------------------- modale */
@@ -682,6 +818,8 @@
       (auPlan
         ? '<button class="bouton" data-remplacer="' + auPlan.index + '" data-fermer="1">↻ Remplacer ce repas</button>'
         : (etat.plan ? '<button class="bouton principal" data-ajouter="' + esc(r.id) + '">+ Ajouter à ma semaine</button>' : '')) +
+      '<button class="bouton' + (etat.choix.indexOf(r.id) >= 0 ? '' : ' principal') + '" data-choix="' + esc(r.id) + '">' +
+      (etat.choix.indexOf(r.id) >= 0 ? '📌 Retirer de ma semaine' : '＋ Imposer dans ma semaine') + '</button>' +
       (r.perso
         ? '<button class="bouton" data-ed-modifier="' + esc(r.id) + '">✎ Modifier</button>'
         : '<button class="bouton" data-ed-dupliquer="' + esc(r.id) + '">⧉ Adapter à ma façon</button>') +
@@ -849,7 +987,12 @@
     var trouves = ING.list.map(function (i) {
       var nom = P.normalise(i.n);
       var pos = nom.indexOf(texte);
-      if (pos < 0) return null;
+      if (pos < 0) {
+        /* Recherche en plusieurs mots : « creme legere » doit trouver
+           « Crème liquide légère ». */
+        if (!tousLesMots(q, i.n)) return null;
+        return { i: i, rang: 3, taille: nom.length };
+      }
       /* 0 : le nom commence par la recherche — 1 : un mot commence par elle
          — 2 : simple occurrence au milieu d'un mot. */
       var rang = pos === 0 ? 0 : (nom.charAt(pos - 1) === ' ' ? 1 : 2);
@@ -1025,7 +1168,9 @@
       envieIntensite: r.envieIntensite, regimes: r.regimes.slice(),
       allergenes: r.allergenes.slice(), exclusions: r.exclusions.slice(),
       tempsMax: r.tempsMax, difficulteMax: r.difficulteMax,
-      favoriserPerso: r.favoriserPerso !== false,
+      sources: (r.sources && r.sources.length) ? r.sources.slice() : ['nous', 'idees'],
+      imposes: etat.choix.slice(),
+      historique: etat.historique.slice(),
       prefSaison: r.prefSaison !== false, budgetSemaine: r.budgetSemaine || 0,
       verrous: verrous || [], exclusRecettes: exclus || []
     };
@@ -1055,6 +1200,11 @@
     etat.plan = plan;
     etat.coches = {};
     etat.onglet = 'semaine';
+    /* On garde de quoi couvrir environ cinq semaines de repas. */
+    etat.historique = plan.repas.map(function (r) { return r.id; })
+      .concat(etat.historique.filter(function (id) {
+        return plan.repas.every(function (r) { return r.id !== id; });
+      })).slice(0, 40);
     sauver();
     render();
     toast(garderVerrous ? 'Nouvelle semaine générée.' : 'Votre semaine est prête.');
@@ -1161,7 +1311,7 @@
     });
     if (!res.ok) { toast(res.erreurs[0]); return; }
     etat.editeur = null;
-    etat.filtrePerso = true;
+    etat.filtreSource = 'nous';
     etat.recherche = '';
     sauver();
     render();
@@ -1217,7 +1367,7 @@
     lecteur.onload = function () {
       var res = C.importer(String(lecteur.result));
       if (!res.ok) { toast(res.erreur); return; }
-      etat.filtrePerso = true;
+      etat.filtreSource = 'nous';
       render();
       toast(res.recettes + ' recette(s) et ' + res.ingredients + ' ingrédient(s) importés' +
         (res.ignorees > 0 ? ' — ' + res.ignorees + ' déjà présente(s) ou incomplète(s).' : '.'));
@@ -1247,13 +1397,29 @@
       toast('Liste trop longue pour ce transfert : utilisez la copie.');
       return;
     }
-    /* Sur un appareil sans l'app Raccourcis, le lien ne mène nulle part :
-       on copie donc la liste en parallèle pour ne jamais laisser l'écran vide. */
+    /* Le lien peut échouer de deux façons : pas d'app Raccourcis, ou pas de
+       raccourci de ce nom. Dans les deux cas la liste est déjà dans le
+       presse-papiers, donc le collage manuel reste possible. */
     copierTexte(lignes.join('\n'), null);
     window.location.href = url;
     setTimeout(function () {
-      toast('Si Raccourcis ne s’est pas ouvert, la liste a été copiée : collez-la dans Rappels.');
-    }, 1500);
+      toast(etat.reglages.rappelsRaccourciPret
+        ? 'Liste envoyée. Elle est aussi copiée, au cas où.'
+        : 'Si Raccourcis répond « Le fichier n’existe pas », le raccourci reste à créer — la liste est copiée en attendant.');
+    }, 1600);
+  }
+
+  /* Feuille de partage iOS : permet d'envoyer la liste vers Notes, Messages
+     ou un raccourci, sans passer par le presse-papiers. */
+  function partagerListe() {
+    var lignes = lignesRappels();
+    if (!lignes.length) { toast('Aucun article à partager.'); return; }
+    if (navigator.share) {
+      navigator.share({ title: 'Liste de courses', text: lignes.join('\n') })
+        .catch(function () { /* partage annulé */ });
+    } else {
+      copierTexte(lignes.join('\n'), 'Partage indisponible : la liste a été copiée.');
+    }
   }
 
   /* ============================== ÉVÉNEMENTS ============================= */
@@ -1269,7 +1435,8 @@
       '[data-remplacer],[data-convives],[data-famille],[data-fermer],[data-ajouter],' +
       '[data-ed-diff],[data-ed-saison],[data-ed-base],[data-ed-ajout],[data-ed-retirer],' +
       '[data-ed-modifier],[data-ed-dupliquer],[data-ni-al],[data-ni-placard],' +
-      '[data-perso-filtre],[data-rappels-opt],[data-fav-perso]');
+      '[data-rappels-opt],[data-source],[data-choix],' +
+      '[data-choix-retirer],[data-filtre-source]');
     if (!t) return;
 
     if (t.hasAttribute('data-fermer')) {
@@ -1305,7 +1472,12 @@
 
     if (t.hasAttribute('data-verrou')) {
       var i2 = parseInt(t.getAttribute('data-verrou'), 10);
-      etat.plan.repas[i2].verrouille = !etat.plan.repas[i2].verrouille;
+      var repasV = etat.plan.repas[i2];
+      repasV.verrouille = !repasV.verrouille;
+      /* Verrouiller un repas revient à l'imposer aux prochains tirages. */
+      var k2 = etat.choix.indexOf(repasV.id);
+      if (repasV.verrouille && k2 < 0) etat.choix.push(repasV.id);
+      if (!repasV.verrouille && k2 >= 0) etat.choix.splice(k2, 1);
       sauver(); render(); return;
     }
 
@@ -1334,7 +1506,6 @@
       return;
     }
     if (t.hasAttribute('data-saison')) { etat.reglages.prefSaison = t.getAttribute('data-saison') === '1'; sauver(); render(); return; }
-    if (t.hasAttribute('data-fav-perso')) { etat.reglages.favoriserPerso = t.getAttribute('data-fav-perso') === '1'; sauver(); render(); return; }
     if (t.hasAttribute('data-famille')) { etat.filtreFamille = t.getAttribute('data-famille'); render(); return; }
 
     /* ----------------------------- éditeur ----------------------------- */
@@ -1379,12 +1550,37 @@
     }
     if (t.hasAttribute('data-ni-al')) { basculer(etat.editeur.nouvelIng.al, t.getAttribute('data-ni-al')); render(); return; }
     if (t.hasAttribute('data-ni-placard')) { etat.editeur.nouvelIng.pl = t.getAttribute('data-ni-placard') === '1'; render(); return; }
-    if (t.hasAttribute('data-perso-filtre')) {
-      etat.filtrePerso = !etat.filtrePerso;
-      if (etat.filtrePerso) etat.filtreFamille = '';
+    if (t.hasAttribute('data-choix') || t.hasAttribute('data-choix-retirer')) {
+      var idChoix = t.getAttribute('data-choix') || t.getAttribute('data-choix-retirer');
+      var dansChoix = etat.choix.indexOf(idChoix);
+      if (t.hasAttribute('data-choix-retirer') || dansChoix >= 0) {
+        if (dansChoix >= 0) etat.choix.splice(dansChoix, 1);
+        /* Le verrou de la semaine en cours suit le même état. */
+        if (etat.plan) {
+          etat.plan.repas.forEach(function (x) { if (x.id === idChoix) x.verrouille = false; });
+        }
+      } else {
+        etat.choix.push(idChoix);
+      }
+      sauver();
+      if (document.getElementById('modale')) fermerModale();
       render();
       return;
     }
+
+    if (t.hasAttribute('data-source')) {
+      var s = t.getAttribute('data-source');
+      etat.reglages.sources = s === 'tout' ? ['nous', 'idees'] : [s];
+      sauver(); render();
+      return;
+    }
+
+    if (t.hasAttribute('data-filtre-source')) {
+      etat.filtreSource = t.getAttribute('data-filtre-source');
+      render();
+      return;
+    }
+
     if (t.hasAttribute('data-rappels-opt')) {
       var cle2 = t.getAttribute('data-rappels-opt') === 'rayons' ? 'rappelsRayons' : 'rappelsPlacard';
       etat.reglages[cle2] = !etat.reglages[cle2];
@@ -1393,7 +1589,13 @@
     }
 
     var action = t.getAttribute('data-action');
-    if (action === 'ed-nouvelle') { ouvrirEditeur(editeurVide()); }
+    if (action === 'choix-vider') {
+      etat.choix = [];
+      if (etat.plan) etat.plan.repas.forEach(function (x) { x.verrouille = false; });
+      sauver(); render();
+      toast('Plats imposés retirés.');
+    }
+    else if (action === 'ed-nouvelle') { ouvrirEditeur(editeurVide()); }
     else if (action === 'ed-annuler') { etat.editeur = null; render(); }
     else if (action === 'ed-enregistrer') { enregistrerRecette(); }
     else if (action === 'ed-supprimer') { supprimerRecetteEditee(); }
@@ -1412,6 +1614,14 @@
     else if (action === 'perso-exporter') { exporterPerso(); }
     else if (action === 'perso-importer') { var f = document.getElementById('fichierImport'); if (f) f.click(); }
     else if (action === 'rappels-raccourci') { envoyerVersRaccourcis(); }
+    else if (action === 'rappels-partager') { partagerListe(); }
+    else if (action === 'rappels-pret') {
+      etat.reglages.rappelsRaccourciPret = !etat.reglages.rappelsRaccourciPret;
+      sauver(); render();
+      toast(etat.reglages.rappelsRaccourciPret
+        ? 'Parfait : un seul bouton suffira désormais.'
+        : 'La marche à suivre est réaffichée.');
+    }
     else if (action === 'rappels-copier') {
       var lr = lignesRappels();
       if (!lr.length) { toast('Aucun article à copier.'); return; }
@@ -1432,7 +1642,14 @@
       if (confirm('Effacer la semaine, la liste de courses et vos réglages ?\n\nVos recettes personnelles sont conservées.')) {
         STORE.effacer();
         etat.plan = null; etat.coches = {}; etat.possede = {};
-        etat.reglages = { nbRepas: 5, convives: 4, envie: '', envieIntensite: 'un_peu', regimes: [], allergenes: [], exclusions: [], tempsMax: 0, difficulteMax: 0, prefSaison: true, budgetSemaine: 0 };
+        etat.choix = []; etat.historique = [];
+        etat.reglages = {
+          nbRepas: 5, convives: 4, envie: '', envieIntensite: 'un_peu',
+          regimes: [], allergenes: [], exclusions: [], tempsMax: 0, difficulteMax: 0,
+          prefSaison: true, budgetSemaine: 0, sources: ['nous', 'idees'],
+          rappelsRaccourci: 'Courses Semainier', rappelsListe: 'Liste de courses',
+          rappelsRaccourciPret: false, rappelsRayons: false, rappelsPlacard: false
+        };
         etat.onglet = 'planifier';
         render();
       }
@@ -1462,6 +1679,7 @@
       el.value = '';
       return;
     }
+    if (el.id === 'nomListeRappels') { etat.reglages.rappelsListe = el.value; sauver(); render(); return; }
     if (el.id === 'tempsMax') { etat.reglages.tempsMax = parseInt(el.value, 10) || 0; sauver(); majBarreBasse(); return; }
     if (el.id === 'difficulteMax') { etat.reglages.difficulteMax = parseInt(el.value, 10) || 0; sauver(); majBarreBasse(); return; }
   });
@@ -1497,7 +1715,8 @@
         return;
       }
     }
-    if (el.id === 'nomRaccourci') { etat.reglages.rappelsRaccourci = el.value; sauver(); return; }
+    if (el.id === 'nomRaccourci') { etat.reglages.rappelsRaccourci = el.value; sauverDiffere(); return; }
+    if (el.id === 'nomListeRappels') { etat.reglages.rappelsListe = el.value; sauverDiffere(); return; }
     if (el.id === 'rechercheAversion') {
       var zone = document.getElementById('listeAversions');
       if (zone) zone.innerHTML = pucesAversions(el.value);

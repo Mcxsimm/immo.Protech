@@ -4,8 +4,9 @@
 
 Vous indiquez combien de repas vous voulez préparer, pour combien de personnes,
 et votre envie du moment. Semainier compose une semaine **équilibrée** à partir
-d'une base de **200 recettes**, puis en déduit une **liste de courses optimisée**,
-rangée dans l'ordre des rayons.
+de **deux bases de recettes** — vos plats habituels et un catalogue d'idées —
+puis en déduit une **liste de courses optimisée**, rangée dans l'ordre des
+rayons.
 
 Site statique, sans compte, sans serveur, sans dépendance : tout est calculé
 dans le navigateur et rien ne sort de votre machine.
@@ -21,7 +22,24 @@ dans le navigateur et rien ne sort de votre machine.
 - **Une envie** exprimée librement : un ingrédient (« poulet »), une cuisine
   (« asiatique », « italien »), une humeur (« réconfortant », « rapide »,
   « léger »). Vous choisissez si elle concerne un ou deux repas, la moitié de la
-  semaine ou toute la semaine.
+  semaine ou toute la semaine ;
+- **Des plats imposés** : depuis l'onglet *Recettes*, le bouton **＋** épingle
+  un plat pour la prochaine semaine. Il y figurera quoi qu'il arrive, et la
+  semaine se compose autour. Verrouiller un repas déjà généré revient au même :
+  les deux gestes désignent la même intention.
+
+### 1 bis. Deux bases de recettes, et vous choisissez
+
+- **★ Nos recettes** — les plats du foyer, ceux qu'on cuisine vraiment ;
+- **💡 Idées** — un catalogue de 200 suggestions, pour sortir de la routine.
+
+Un sélecteur permet de piocher dans l'une, dans l'autre ou dans les deux. Les
+recettes que vous créez dans l'application rejoignent automatiquement « nos
+recettes ». Si la base choisie ne contient pas assez de plats compatibles, les
+deux sont utilisées et l'application le dit.
+
+Une base restreinte ramène forcément plus souvent les mêmes plats : c'est
+signalé sous le sélecteur, et c'est une invitation à l'étoffer.
 
 ### 2. Vos contraintes alimentaires sont des règles, pas des suggestions
 - **Régimes** : végétarien, végétalien, sans porc, sans gluten, sans lactose,
@@ -73,20 +91,27 @@ peut réduire la variété), l'application le **dit** au lieu de le masquer.
 
 ### 5. La liste part dans Rappels (iPhone, iPad, Mac)
 
-Apple n'offre aucun format d'import direct pour Rappels. Semainier propose
-donc les deux seuls chemins réellement fiables :
+Apple n'expose aucun moyen d'écrire directement dans Rappels depuis une page
+web. Deux chemins existent, présentés dans cet ordre :
 
-- **Via Raccourcis** — un bouton ouvre l'app Raccourcis et lui passe la liste ;
-  un raccourci de quatre actions, à créer une fois (la marche à suivre est
-  dépliable dans l'application), découpe le texte ligne par ligne et crée un
-  rappel par article dans la liste de votre choix.
-- **Par copie** — un bouton copie la liste, une ligne par article ; collée
-  dans une liste Rappels, chaque ligne devient un rappel distinct.
+- **Copier-coller — rien à installer.** Un bouton copie la liste, une ligne
+  par article ; dans Rappels, ouvrez votre liste et collez : un rappel est
+  créé par ligne. Sur les appareils qui proposent la feuille de partage iOS,
+  un bouton *Partager* permet aussi d'envoyer la liste vers Notes, Messages ou
+  un raccourci.
+- **Envoi automatique — un raccourci à créer une fois.** Un bouton ouvre
+  l'app Raccourcis et lui passe la liste ; un raccourci de quatre actions
+  (*Diviser le texte* → *Répéter pour chaque élément* → *Ajouter un nouveau
+  rappel*) crée un rappel par article. Tant que ce raccourci n'existe pas,
+  iOS répond « Le fichier n'existe pas » : la marche à suivre reste donc
+  dépliée dans l'application jusqu'à ce que vous confirmiez l'avoir créé.
 
+Vous indiquez le **nom de votre liste Rappels** ; les instructions s'y
+réfèrent nommément, pour qu'il n'y ait rien à deviner à l'étape de création.
 Dans les deux cas les articles déjà cochés sont omis, et deux options
 permettent de préfixer chaque ligne par son rayon et d'inclure ou non les
 produits de placard. Le bouton Raccourcis copie aussi la liste au passage :
-sur un appareil sans l'app Raccourcis, rien n'est perdu.
+si l'app est absente ou le raccourci introuvable, rien n'est perdu.
 
 ### 6. Vos propres recettes
 
@@ -162,7 +187,8 @@ index.html                  page unique
 assets/css/app.css          thèmes clair/sombre, mise en page responsive
 assets/data/ingredients.js  205 ingrédients : nutrition, rayon, prix,
                             conditionnement, allergènes, catégorie
-assets/data/recipes.js      200 recettes : quantités PAR PERSONNE + étapes
+assets/data/recipes.js      200 idées : quantités PAR PERSONNE + étapes
+assets/data/recipes-maison.js  les recettes du foyer (base « nous »)
 assets/js/nutrition.js      moteur de déduction (profil d'une recette)
 assets/js/planner.js        génération et optimisation de la semaine
 assets/js/shopping.js       agrégation et optimisation de la liste de courses
@@ -187,21 +213,32 @@ pas se déclarer « végétarienne » tout en contenant des lardons.
 
 ### La génération
 
-1. **Filtrage** : on ne garde que les recettes compatibles avec les régimes,
-   allergies, aversions, temps et niveau demandés ;
-2. **Amorçage** : si l'envie désigne clairement un plat (« gratin de courgettes
+1. **Plats imposés** : ceux que vous avez épinglés prennent leur place avant
+   tout le reste. Un choix délibéré prime sur les filtres — si un plat imposé
+   contredit une contrainte déclarée, il est gardé et le conflit est affiché,
+   jamais écarté en silence ;
+2. **Filtrage** : parmi la ou les bases choisies, on ne garde que les recettes
+   compatibles avec les régimes, allergies, aversions, temps et niveau ;
+3. **Amorçage** : si l'envie désigne clairement un plat (« gratin de courgettes
    de mamie »), ce plat est placé d'office, à hauteur du nombre de repas
    demandé pour cette envie. Sans cela, une recette nommément réclamée n'était
    retenue que trois fois sur vingt ;
-3. **Tirage pondéré** : l'envie, la saison et vos recettes personnelles
-   augmentent les chances d'une recette ; plusieurs centaines de semaines
-   candidates sont tirées ;
-4. **Notation** : chaque semaine candidate reçoit une note qui agrège les
-   repères nutritionnels, la variété et l'anti-gaspi. Le bonus d'envie est
+4. **Tirage pondéré** : l'envie et la saison augmentent les chances d'une
+   recette, les plats des dernières semaines les réduisent fortement ;
+   plusieurs centaines de semaines candidates sont tirées ;
+5. **Notation** : chaque semaine candidate reçoit une note qui agrège les
+   repères nutritionnels, la variété, l'anti-gaspi et les redites récentes.
+   Le bonus d'envie est
    **plafonné au nombre de repas demandé** : un plat de plus dans le même goût
    ne rapporte rien, et ne peut donc pas évincer les repères d'équilibre ;
-5. **Amélioration locale** : on remplace des repas un à un tant que la note
-   progresse, en respectant les repas verrouillés et les plats amorcés.
+6. **Amélioration locale** : on remplace des repas un à un tant que la note
+   progresse, en respectant les repas imposés, verrouillés et amorcés.
+
+**Mémoire des semaines passées.** Les repas des dernières semaines sont
+retenus et fortement dépriorisés. Sans ce mécanisme, l'optimisation ramenait
+toujours les mêmes plats les mieux notés : sur 20 regénérations d'affilée,
+49 recettes distinctes seulement, dont 46 % des repas occupés par les dix
+mêmes. Avec la mémoire : 70 recettes distinctes, et 25 % pour le top dix.
 
 Le tirage est **déterministe à graine fixée** : à graine égale, même semaine —
 ce qui rend les résultats reproductibles et testables.
@@ -215,8 +252,12 @@ d'équilibre sont atteints.
 ## Ajouter une recette
 
 **Depuis l'application** : onglet *Recettes* → **Créer une recette**. C'est la
-voie normale ; rien à installer, et la recette est immédiatement utilisable
-dans vos semaines.
+voie normale ; rien à installer, et la recette rejoint aussitôt la base
+« ★ nos recettes », utilisable dans vos semaines.
+
+**Dans la base du foyer**, pour une recette partagée par tout le monde via le
+dépôt : ajoutez-la dans `assets/data/recipes-maison.js`, même format, le champ
+`src` étant posé automatiquement.
 
 **Dans le catalogue livré**, pour proposer une recette à tout le monde :
 ajoutez une entrée dans `assets/data/recipes.js`.

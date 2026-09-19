@@ -257,7 +257,26 @@
     { id: 'vin_rouge', n: 'Vin rouge', r: 'boissons', u: 'ml', kcal: 85, p: 0.1, c: 2.6, l: 0, f: 0, px: 6, pk: 750, pkl: 'bouteille', ct: 'condiment' },
     { id: 'biere', n: "Bière blonde", r: 'boissons', u: 'ml', kcal: 43, p: 0.5, c: 3.6, l: 0, f: 0, px: 3, pk: 330, pkl: 'bouteille', ct: 'condiment', al: ['gluten'] },
     { id: 'jus_orange', n: "Jus d'orange", r: 'boissons', u: 'ml', kcal: 45, p: 0.7, c: 10, l: 0.1, f: 0.2, px: 2, pk: 1000, pkl: 'brique', ct: 'fruit' },
-    { id: 'lait_amande', n: "Boisson végétale amande", r: 'boissons', u: 'ml', kcal: 24, p: 0.5, c: 2.4, l: 1.2, f: 0.3, px: 2.2, pk: 1000, pkl: 'brique', ct: 'vegetal', al: ['fruits_a_coque'] }
+    { id: 'lait_amande', n: "Boisson végétale amande", r: 'boissons', u: 'ml', kcal: 24, p: 0.5, c: 2.4, l: 1.2, f: 0.3, px: 2.2, pk: 1000, pkl: 'brique', ct: 'vegetal', al: ['fruits_a_coque'] },
+    /* ------ Ajouts pour les recettes maison (voir recipes-maison.js) ----- */
+    { id: 'edamame', n: "Édamamé (surgelé)", r: 'surgeles', u: 'g', kcal: 122, p: 11, c: 9, l: 5, f: 5, px: 8, pk: 400, pkl: 'sachet', ct: 'legumineuse', veg: 1, al: ['soja'] },
+    { id: 'melon', n: 'Melon', r: 'legumes', u: 'g', kcal: 34, p: 0.8, c: 8, l: 0.2, f: 0.9, px: 2.5, ct: 'fruit', fr: 1 },
+    { id: 'pamplemousse', n: 'Pamplemousse', r: 'legumes', u: 'pc', pc: 250, up: 'pamplemousse', kcal: 42, p: 0.8, c: 9, l: 0.1, f: 1.6, px: 1.5, ct: 'fruit', fr: 1 },
+    { id: 'blanc_dinde', n: 'Blanc de dinde (tranches)', r: 'boucherie', u: 'pc', pc: 25, up: 'tranche', kcal: 105, p: 20, c: 1, l: 2, f: 0, px: 0.95, ct: 'charcuterie' },
+    { id: 'viande_grisons', n: 'Viande des Grisons', r: 'boucherie', u: 'pc', pc: 15, up: 'tranche', kcal: 240, p: 36, c: 1, l: 10, f: 0, px: 1.4, ct: 'charcuterie' },
+    { id: 'fromage_frais', n: 'Fromage frais nature', r: 'cremerie', u: 'g', kcal: 150, p: 8, c: 4, l: 11, f: 0, px: 9, pk: 150, pkl: 'pot', ct: 'fromage', al: ['lactose'] },
+    { id: 'burrata', n: 'Burrata', r: 'cremerie', u: 'g', kcal: 280, p: 15, c: 2, l: 24, f: 0, px: 18, pk: 125, pkl: 'boule', ct: 'fromage', al: ['lactose'] },
+    { id: 'camembert', n: 'Camembert', r: 'cremerie', u: 'g', kcal: 300, p: 20, c: 1, l: 24, f: 0, px: 12, pk: 250, pkl: "boîte", ct: 'fromage', al: ['lactose'] },
+    { id: 'cheddar', n: "Cheddar râpé", r: 'cremerie', u: 'g', kcal: 400, p: 25, c: 1, l: 33, f: 0, px: 14, pk: 200, pkl: 'sachet', ct: 'fromage', al: ['lactose'] },
+    { id: 'feuille_brick', n: 'Feuilles de brick', r: 'cremerie', u: 'pc', pc: 20, up: 'feuille', kcal: 300, p: 8, c: 55, l: 5, f: 2, px: 0.3, ct: 'feculent', al: ['gluten'] },
+    { id: 'orzo', n: "Orzo (langues d'oiseau)", r: 'epicerie', u: 'g', kcal: 360, p: 12, c: 71, l: 1.5, f: 3, px: 3.2, pk: 500, pkl: 'paquet', ct: 'feculent', al: ['gluten'] },
+    { id: 'oignon_frit', n: 'Oignons frits', r: 'epicerie', u: 'g', kcal: 500, p: 5, c: 30, l: 40, f: 3, px: 15, pk: 100, pkl: 'sachet', ct: 'condiment', pl: 1 },
+    { id: 'beurre_cacahuete', n: "Beurre de cacahuète", r: 'condiments', u: 'g', kcal: 600, p: 25, c: 12, l: 50, f: 6, px: 12, pk: 350, pkl: 'pot', ct: 'oleagineux', al: ['fruits_a_coque'] },
+    { id: 'pesto_rouge', n: 'Pesto rouge', r: 'condiments', u: 'g', kcal: 380, p: 5, c: 8, l: 36, f: 3, px: 15, pk: 190, pkl: 'pot', ct: 'condiment', al: ['lactose'] },
+    { id: 'mayonnaise', n: 'Mayonnaise', r: 'condiments', u: 'g', kcal: 680, p: 1, c: 2, l: 75, f: 0, px: 8, pk: 250, pkl: 'pot', ct: 'matiere_grasse', al: ['oeuf', 'moutarde'], pl: 1 },
+    { id: 'bagel', n: 'Bagels', r: 'boulangerie', u: 'pc', pc: 90, up: 'bagel', kcal: 275, p: 10, c: 52, l: 2, f: 2, px: 0.8, ct: 'feculent', al: ['gluten'] },
+    { id: 'naan', n: 'Naans', r: 'boulangerie', u: 'pc', pc: 90, up: 'naan', kcal: 290, p: 9, c: 50, l: 6, f: 2, px: 1.2, ct: 'feculent', al: ['gluten'] },
+    { id: 'pain_de_mie', n: 'Pain de mie', r: 'boulangerie', u: 'pc', pc: 30, up: 'tranche', kcal: 270, p: 8, c: 48, l: 4, f: 3, px: 0.16, ct: 'feculent', al: ['gluten'] }
   ];
 
   var BY_ID = {};
